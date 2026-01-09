@@ -52,3 +52,10 @@ completions/
 !internal/tui/components/completions/
 .prettierignore
 .crush-trees/
+
+# E2E test artifacts
+e2e/node_modules/
+e2e/tui-traces/
+e2e/dist/
+e2e/package-lock.json
+e2e/.tui-test/
