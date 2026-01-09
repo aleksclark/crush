@@ -40,6 +40,10 @@ type Session struct {
 	Todos            []Todo
 	CreatedAt        int64
 	UpdatedAt        int64
+
+	// WorkingDir is the working directory for this session (runtime only, not persisted).
+	// When worktree mode is enabled, this points to the session's worktree directory.
+	WorkingDir string
 }
 
 type Service interface {

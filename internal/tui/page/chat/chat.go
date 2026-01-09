@@ -35,10 +35,12 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/hyper"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/reasoning"
+	wtdialog "github.com/charmbracelet/crush/internal/tui/components/dialogs/worktree"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/crush/internal/version"
+	"github.com/charmbracelet/crush/internal/worktree"
 )
 
 var ChatPageID page.PageID = "chat"
@@ -418,6 +420,16 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return p, p.SetSize(p.width, p.height)
 	case commands.NewSessionsMsg:
 		return p, p.newSession()
+	case wtdialog.WorktreeCreatedMsg:
+		// Update the working directory in config and reinitialize the agent.
+		config.Get().SetWorkingDir(msg.Path)
+		if err := p.app.InitCoderAgent(context.TODO()); err != nil {
+			return p, util.ReportError(fmt.Errorf("failed to reinitialize agent: %w", err))
+		}
+		return p, tea.Batch(
+			p.clearSession(msg.Path),
+			util.ReportInfo("Worktree created: "+msg.Name),
+		)
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, p.keyMap.NewSession):
@@ -824,11 +836,52 @@ func (p *chatPage) SetSize(width, height int) tea.Cmd {
 }
 
 func (p *chatPage) newSession() tea.Cmd {
+	// Check if worktree mode is enabled.
+	cfg := config.Get()
+	if cfg.Options != nil && cfg.Options.WorktreeMode {
+		// Open worktree dialog to get session name.
+		dialog := wtdialog.NewDialog(p.handleWorktreeSubmit)
+		return util.CmdHandler(dialogs.OpenDialogMsg{Model: dialog})
+	}
+
+	// For non-worktree mode, only clear if there's an existing session.
 	if p.session.ID == "" {
 		return nil
 	}
 
-	p.session = session.Session{}
+	return p.clearSession("")
+}
+
+// handleWorktreeSubmit handles the worktree dialog submission.
+func (p *chatPage) handleWorktreeSubmit(name string) tea.Cmd {
+	return func() tea.Msg {
+		cfg := config.Get()
+		mgr, err := worktree.NewManager(cfg.WorkingDir())
+		if err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "Failed to initialize worktree manager: " + err.Error(),
+			}
+		}
+
+		path, err := mgr.Create(context.Background(), name)
+		if err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "Failed to create worktree: " + err.Error(),
+			}
+		}
+
+		return wtdialog.WorktreeCreatedMsg{
+			Name: name,
+			Path: path,
+		}
+	}
+}
+
+// clearSession clears the current session and optionally sets a working directory.
+func (p *chatPage) clearSession(workingDir string) tea.Cmd {
+	p.session = session.Session{WorkingDir: workingDir}
 	p.focusedPane = PanelTypeEditor
 	p.editor.Focus()
 	p.chat.Blur()

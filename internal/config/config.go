@@ -252,6 +252,7 @@ type Options struct {
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	WorktreeMode              bool         `json:"worktree_mode,omitempty" jsonschema:"description=Enable git worktree mode. Each new session creates a git worktree in .crush-trees directory,default=false"`
 }
 
 type MCPs map[string]MCPConfig
@@ -387,6 +388,12 @@ type Config struct {
 
 func (c *Config) WorkingDir() string {
 	return c.workingDir
+}
+
+// SetWorkingDir updates the working directory. This is used by worktree mode
+// to change the working directory when switching sessions.
+func (c *Config) SetWorkingDir(dir string) {
+	c.workingDir = dir
 }
 
 func (c *Config) EnabledProviders() []ProviderConfig {
