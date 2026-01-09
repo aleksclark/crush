@@ -331,6 +331,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 
 func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.workingDir = workingDir
+	c.originalWorkingDir = workingDir
 	if c.Options == nil {
 		c.Options = &Options{}
 	}

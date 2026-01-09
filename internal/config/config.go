@@ -379,7 +379,8 @@ type Config struct {
 	Agents map[string]Agent `json:"-"`
 
 	// Internal
-	workingDir string `json:"-"`
+	workingDir         string `json:"-"`
+	originalWorkingDir string `json:"-"` // The original working directory when crush was launched.
 	// TODO: find a better way to do this this should probably not be part of the config
 	resolver       VariableResolver
 	dataConfigDir  string             `json:"-"`
@@ -388,6 +389,11 @@ type Config struct {
 
 func (c *Config) WorkingDir() string {
 	return c.workingDir
+}
+
+// OriginalWorkingDir returns the original working directory when crush was launched.
+func (c *Config) OriginalWorkingDir() string {
+	return c.originalWorkingDir
 }
 
 // SetWorkingDir updates the working directory. This is used by worktree mode

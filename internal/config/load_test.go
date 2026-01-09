@@ -54,6 +54,22 @@ func TestConfig_setDefaults(t *testing.T) {
 		require.Contains(t, cfg.Options.ContextPaths, path)
 	}
 	require.Equal(t, "/tmp", cfg.workingDir)
+	require.Equal(t, "/tmp", cfg.originalWorkingDir)
+}
+
+func TestConfig_WorkingDirMethods(t *testing.T) {
+	t.Run("SetWorkingDir updates workingDir but not originalWorkingDir", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.setDefaults("/original", "")
+
+		require.Equal(t, "/original", cfg.WorkingDir())
+		require.Equal(t, "/original", cfg.OriginalWorkingDir())
+
+		cfg.SetWorkingDir("/new/worktree")
+
+		require.Equal(t, "/new/worktree", cfg.WorkingDir())
+		require.Equal(t, "/original", cfg.OriginalWorkingDir())
+	})
 }
 
 func TestConfig_configureProviders(t *testing.T) {

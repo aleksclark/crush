@@ -41,7 +41,7 @@ type Session struct {
 	CreatedAt        int64
 	UpdatedAt        int64
 
-	// WorkingDir is the working directory for this session (runtime only, not persisted).
+	// WorkingDir is the working directory for this session.
 	// When worktree mode is enabled, this points to the session's worktree directory.
 	WorkingDir string
 }
@@ -49,6 +49,7 @@ type Session struct {
 type Service interface {
 	pubsub.Subscriber[Session]
 	Create(ctx context.Context, title string) (Session, error)
+	CreateWithWorkingDir(ctx context.Context, title, workingDir string) (Session, error)
 	CreateTitleSession(ctx context.Context, parentSessionID string) (Session, error)
 	CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error)
 	Get(ctx context.Context, id string) (Session, error)
@@ -69,9 +70,17 @@ type service struct {
 }
 
 func (s *service) Create(ctx context.Context, title string) (Session, error) {
+	return s.CreateWithWorkingDir(ctx, title, "")
+}
+
+func (s *service) CreateWithWorkingDir(ctx context.Context, title, workingDir string) (Session, error) {
 	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
 		ID:    uuid.New().String(),
 		Title: title,
+		WorkingDir: sql.NullString{
+			String: workingDir,
+			Valid:  workingDir != "",
+		},
 	})
 	if err != nil {
 		return Session{}, err
@@ -152,6 +161,10 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 			String: todosJSON,
 			Valid:  todosJSON != "",
 		},
+		WorkingDir: sql.NullString{
+			String: session.WorkingDir,
+			Valid:  session.WorkingDir != "",
+		},
 	})
 	if err != nil {
 		return Session{}, err
@@ -202,6 +215,7 @@ func (s service) fromDBItem(item db.Session) Session {
 		Todos:            todos,
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
+		WorkingDir:       item.WorkingDir.String,
 	}
 }
 

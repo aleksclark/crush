@@ -856,7 +856,9 @@ func (p *chatPage) newSession() tea.Cmd {
 func (p *chatPage) handleWorktreeSubmit(name string) tea.Cmd {
 	return func() tea.Msg {
 		cfg := config.Get()
-		mgr, err := worktree.NewManager(cfg.WorkingDir())
+		// Use the original working directory (repo root) to create worktrees,
+		// not the current working directory which may be inside another worktree.
+		mgr, err := worktree.NewManager(cfg.OriginalWorkingDir())
 		if err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
@@ -899,6 +901,22 @@ func (p *chatPage) setSession(sess session.Session) tea.Cmd {
 
 	var cmds []tea.Cmd
 	p.session = sess
+
+	// Update the working directory based on the session. If the session has a
+	// custom working directory (e.g., from worktree mode), use that. Otherwise,
+	// use the original working directory from when crush was launched.
+	cfg := config.Get()
+	newWorkingDir := sess.WorkingDir
+	if newWorkingDir == "" {
+		newWorkingDir = cfg.OriginalWorkingDir()
+	}
+	if cfg.WorkingDir() != newWorkingDir {
+		cfg.SetWorkingDir(newWorkingDir)
+		// Reinitialize the agent to use the new working directory.
+		if err := p.app.InitCoderAgent(context.TODO()); err != nil {
+			cmds = append(cmds, util.ReportError(fmt.Errorf("failed to reinitialize agent: %w", err)))
+		}
+	}
 
 	if p.hasInProgressTodo() {
 		cmds = append(cmds, p.todoSpinner.Tick)
@@ -1001,10 +1019,9 @@ func (p *chatPage) sendMessage(text string, attachments []message.Attachment) te
 	session := p.session
 	var cmds []tea.Cmd
 	if p.session.ID == "" {
-		// XXX: The second argument here is the session name, which we leave
-		// blank as it will be auto-generated. Ideally, we remove the need for
-		// that argument entirely.
-		newSession, err := p.app.Sessions.Create(context.Background(), "")
+		// Create a new session. If we have a working directory set (e.g., from
+		// worktree mode), persist it with the session.
+		newSession, err := p.app.Sessions.CreateWithWorkingDir(context.Background(), "", p.session.WorkingDir)
 		if err != nil {
 			return util.ReportError(err)
 		}
