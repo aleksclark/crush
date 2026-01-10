@@ -331,6 +331,9 @@ type Agent struct {
 	//  if this is nil, all tools are available
 	AllowedTools []string `json:"allowed_tools,omitempty"`
 
+	// DisallowedTools are tools to remove from the allowed list.
+	DisallowedTools []string `json:"disallowed_tools,omitempty"`
+
 	// this tells us which MCPs are available for this agent
 	//  if this is empty all mcps are available
 	//  the string array is the list of tools from the AllowedMCP the agent has available
@@ -339,6 +342,22 @@ type Agent struct {
 
 	// Overrides the context paths for this agent
 	ContextPaths []string `json:"context_paths,omitempty"`
+
+	// SystemPrompt is custom system prompt from markdown body (subagents only).
+	SystemPrompt string `json:"-"`
+
+	// PermissionMode controls permission handling: default, acceptEdits, dontAsk,
+	// bypassPermissions, plan.
+	PermissionMode string `json:"permission_mode,omitempty"`
+
+	// Skills are skills to load into the subagent's context.
+	Skills []string `json:"skills,omitempty"`
+
+	// SourcePath is the file path for file-based subagents.
+	SourcePath string `json:"-"`
+
+	// IsSubagent indicates this agent was loaded from a subagent definition file.
+	IsSubagent bool `json:"-"`
 }
 
 type Tools struct {

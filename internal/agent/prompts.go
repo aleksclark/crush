@@ -17,6 +17,9 @@ var taskPromptTmpl []byte
 //go:embed templates/initialize.md.tpl
 var initializePromptTmpl []byte
 
+//go:embed templates/subagent.md.tpl
+var subagentPromptTmpl []byte
+
 func coderPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
 	systemPrompt, err := prompt.NewPrompt("coder", string(coderPromptTmpl), opts...)
 	if err != nil {
@@ -27,6 +30,17 @@ func coderPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
 
 func taskPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
 	systemPrompt, err := prompt.NewPrompt("task", string(taskPromptTmpl), opts...)
+	if err != nil {
+		return nil, err
+	}
+	return systemPrompt, nil
+}
+
+// customSubagentPrompt creates a prompt with a custom system prompt template.
+func customSubagentPrompt(customPrompt string, opts ...prompt.Option) (*prompt.Prompt, error) {
+	// Wrap the custom prompt with the subagent template base.
+	template := customPrompt + "\n" + string(subagentPromptTmpl)
+	systemPrompt, err := prompt.NewPrompt("subagent", template, opts...)
 	if err != nil {
 		return nil, err
 	}

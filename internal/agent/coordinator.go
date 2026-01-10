@@ -14,6 +14,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -30,6 +31,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/subagent"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -58,6 +60,12 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+
+	// Subagent methods.
+	SetSubagentRegistry(registry *subagent.Registry)
+	GetSubagent(name string) (*subagent.Subagent, bool)
+	ListSubagents() []*subagent.Subagent
+	ReloadSubagents() error
 }
 
 type coordinator struct {
@@ -70,6 +78,11 @@ type coordinator struct {
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+
+	// Subagent registry for dynamic subagent management.
+	subagentRegistry *subagent.Registry
+	subagentCache    *csync.Map[string, SessionAgent]
+	subagentMu       sync.RWMutex
 
 	readyWg errgroup.Group
 }
@@ -875,4 +888,103 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 		return err
 	}
 	return nil
+}
+
+// SetSubagentRegistry sets the subagent registry for dynamic subagent management.
+func (c *coordinator) SetSubagentRegistry(registry *subagent.Registry) {
+	c.subagentMu.Lock()
+	defer c.subagentMu.Unlock()
+
+	c.subagentRegistry = registry
+	c.subagentCache = csync.NewMap[string, SessionAgent]()
+}
+
+// GetSubagent returns a subagent by name from the registry.
+func (c *coordinator) GetSubagent(name string) (*subagent.Subagent, bool) {
+	c.subagentMu.RLock()
+	defer c.subagentMu.RUnlock()
+
+	if c.subagentRegistry == nil {
+		return nil, false
+	}
+	return c.subagentRegistry.Get(name)
+}
+
+// ListSubagents returns all registered subagents.
+func (c *coordinator) ListSubagents() []*subagent.Subagent {
+	c.subagentMu.RLock()
+	defer c.subagentMu.RUnlock()
+
+	if c.subagentRegistry == nil {
+		return nil
+	}
+	return c.subagentRegistry.List()
+}
+
+// ReloadSubagents triggers a reload of all subagent definitions.
+func (c *coordinator) ReloadSubagents() error {
+	c.subagentMu.Lock()
+	defer c.subagentMu.Unlock()
+
+	if c.subagentRegistry == nil {
+		return errors.New("subagent registry not initialized")
+	}
+
+	// Clear the cache so subagents are rebuilt on next use.
+	c.subagentCache = csync.NewMap[string, SessionAgent]()
+
+	return c.subagentRegistry.Reload()
+}
+
+// getOrBuildSubagentSession returns a cached subagent session or builds a new one.
+func (c *coordinator) getOrBuildSubagentSession(ctx context.Context, name string) (SessionAgent, error) {
+	// Check cache first.
+	if agent, ok := c.subagentCache.Get(name); ok {
+		return agent, nil
+	}
+
+	c.subagentMu.Lock()
+	defer c.subagentMu.Unlock()
+
+	// Double-check after acquiring lock.
+	if agent, ok := c.subagentCache.Get(name); ok {
+		return agent, nil
+	}
+
+	// Get subagent definition.
+	def, ok := c.subagentRegistry.Get(name)
+	if !ok {
+		return nil, fmt.Errorf("subagent %q not found", name)
+	}
+
+	// Build the agent.
+	agent, err := c.buildSubagentFromDef(ctx, def)
+	if err != nil {
+		return nil, fmt.Errorf("building subagent %q: %w", name, err)
+	}
+
+	c.subagentCache.Set(name, agent)
+	return agent, nil
+}
+
+// buildSubagentFromDef builds a SessionAgent from a subagent definition.
+func (c *coordinator) buildSubagentFromDef(ctx context.Context, def *subagent.Subagent) (SessionAgent, error) {
+	agentCfg := def.ToAgent()
+
+	// Build prompt with custom system prompt.
+	var p *prompt.Prompt
+	var err error
+
+	if def.SystemPrompt != "" {
+		// Use custom system prompt from the subagent definition.
+		p, err = customSubagentPrompt(def.SystemPrompt, prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	} else {
+		// Use default task prompt.
+		p, err = taskPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return c.buildAgent(ctx, p, agentCfg, true)
 }

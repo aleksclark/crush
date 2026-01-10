@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +32,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/subagent"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/update"
@@ -47,6 +49,7 @@ type App struct {
 	Permissions permission.Service
 
 	AgentCoordinator agent.Coordinator
+	SubagentRegistry *subagent.Registry
 
 	LSPClients *csync.Map[string, *lsp.Client]
 
@@ -353,7 +356,100 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
+
+	// Initialize subagent registry.
+	if err := app.initSubagentRegistry(ctx); err != nil {
+		slog.Warn("Failed to initialize subagent registry", "error", err)
+		// Non-fatal: continue without subagents.
+	}
+
 	return nil
+}
+
+// initSubagentRegistry initializes the subagent registry and starts file watching.
+func (app *App) initSubagentRegistry(ctx context.Context) error {
+	// Build watch paths.
+	// Use directory of global config as user config dir.
+	userConfigDir := filepath.Dir(config.GlobalConfig())
+	watchPaths := subagent.DiscoverPaths(app.config.WorkingDir(), userConfigDir)
+
+	app.SubagentRegistry = subagent.NewRegistry(watchPaths)
+
+	// Start the registry (initial discovery + file watching).
+	if err := app.SubagentRegistry.Start(ctx); err != nil {
+		return fmt.Errorf("starting subagent registry: %w", err)
+	}
+
+	// Connect registry to coordinator.
+	app.AgentCoordinator.SetSubagentRegistry(app.SubagentRegistry)
+
+	// Add cleanup function.
+	app.cleanupFuncs = append(app.cleanupFuncs, func() error {
+		return app.SubagentRegistry.Stop()
+	})
+
+	// Forward registry events to the TUI events channel.
+	go app.forwardSubagentEvents(ctx)
+
+	slog.Info("Subagent registry initialized", "paths", watchPaths, "count", app.SubagentRegistry.Count())
+	return nil
+}
+
+// forwardSubagentEvents forwards subagent registry events to the TUI.
+func (app *App) forwardSubagentEvents(ctx context.Context) {
+	if app.SubagentRegistry == nil {
+		return
+	}
+
+	events := app.SubagentRegistry.Subscribe()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			// Convert to pubsub message.
+			var msg pubsub.SubagentEventMsg
+			msg.Type = string(event.Type)
+			if event.Subagent != nil {
+				msg.Name = event.Subagent.Name
+			}
+			if event.Error != nil {
+				msg.Err = event.Error
+			}
+
+			// Send to TUI events channel.
+			select {
+			case app.events <- msg:
+			default:
+				slog.Debug("Dropping subagent event, channel full")
+			}
+
+			// Also invalidate coordinator cache on updates/removes.
+			if event.Type == subagent.EventUpdated || event.Type == subagent.EventRemoved {
+				slog.Debug("Subagent changed, coordinator cache will be invalidated on next use",
+					"name", event.Subagent.Name, "type", event.Type)
+			}
+		}
+	}
+}
+
+// ReloadSubagents triggers a reload of all subagent definitions.
+func (app *App) ReloadSubagents() error {
+	if app.AgentCoordinator == nil {
+		return errors.New("agent coordinator not initialized")
+	}
+	return app.AgentCoordinator.ReloadSubagents()
+}
+
+// ListSubagents returns all registered subagents.
+func (app *App) ListSubagents() []*subagent.Subagent {
+	if app.AgentCoordinator == nil {
+		return nil
+	}
+	return app.AgentCoordinator.ListSubagents()
 }
 
 // Subscribe sends events to the TUI as tea.Msgs.

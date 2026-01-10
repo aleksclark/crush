@@ -81,6 +81,7 @@ type (
 	OpenReasoningDialogMsg struct{}
 	OpenExternalEditorMsg  struct{}
 	ToggleYoloModeMsg      struct{}
+	OpenAgentsDialogMsg    struct{}
 	CompactMsg             struct {
 		SessionID string
 	}
@@ -433,6 +434,15 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 	}
 
 	return append(commands, []Command{
+		{
+			ID:          "agents",
+			Title:       "Agents",
+			Description: "View and manage available subagents",
+			Shortcut:    "ctrl+a",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(OpenAgentsDialogMsg{})
+			},
+		},
 		{
 			ID:          "toggle_yolo",
 			Title:       "Toggle Yolo Mode",

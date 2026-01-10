@@ -26,6 +26,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/core/status"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/agents"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
@@ -273,6 +274,13 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 	case commands.ToggleYoloModeMsg:
 		a.app.Permissions.SetSkipRequests(!a.app.Permissions.SkipRequests())
+	case commands.OpenAgentsDialogMsg:
+		return a, func() tea.Msg {
+			subagents := a.app.ListSubagents()
+			return dialogs.OpenDialogMsg{
+				Model: agents.NewAgentsDialogCmp(subagents),
+			}
+		}
 	case commands.ToggleHelpMsg:
 		a.status.ToggleFullHelp()
 		a.showingFullHelp = !a.showingFullHelp
@@ -553,6 +561,20 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			},
 		)
 		return tea.Sequence(cmds...)
+	case key.Matches(msg, a.keyMap.Agents):
+		// Agents dialog doesn't require configuration - it's just viewing available agents.
+		if a.dialog.ActiveDialogID() == agents.AgentsDialogID {
+			return util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		if a.dialog.HasDialogs() {
+			return nil
+		}
+		return func() tea.Msg {
+			subagents := a.app.ListSubagents()
+			return dialogs.OpenDialogMsg{
+				Model: agents.NewAgentsDialogCmp(subagents),
+			}
+		}
 	case key.Matches(msg, a.keyMap.Suspend):
 		if a.app.AgentCoordinator != nil && a.app.AgentCoordinator.IsBusy() {
 			return util.ReportWarn("Agent is busy, please wait...")
