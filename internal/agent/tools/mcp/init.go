@@ -189,6 +189,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 			}
 
 			toolCount := updateTools(name, tools)
+			slog.Info("MCP tools registered", "name", name, "count", toolCount)
 			updatePrompts(name, prompts)
 			sessions.Set(name, session)
 

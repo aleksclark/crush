@@ -58,6 +58,7 @@ type App struct {
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
 	events          chan tea.Msg
+	mcpInitDone     chan struct{}
 	tuiWG           *sync.WaitGroup
 
 	// global context and cleanup functions
@@ -101,9 +102,11 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)
 
+	app.mcpInitDone = make(chan struct{})
 	go func() {
 		slog.Info("Initializing MCP clients")
 		mcp.Initialize(ctx, app.Permissions, cfg)
+		close(app.mcpInitDone)
 	}()
 
 	// cleanup database upon app shutdown
@@ -129,6 +132,14 @@ func (app *App) Config() *config.Config {
 // given prompt, printing to stdout.
 func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt string, quiet bool) error {
 	slog.Info("Running in non-interactive mode")
+
+	// Wait for MCP clients to initialize before starting the run
+	select {
+	case <-app.mcpInitDone:
+		// MCP initialization complete
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

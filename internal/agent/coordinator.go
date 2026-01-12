@@ -198,6 +198,17 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		}
 	}
 
+	// Handle context length exceeded by summarizing and retrying.
+	if c.isContextLengthExceeded(originalErr) {
+		slog.Info("Context length exceeded. Summarizing conversation and retrying", "session", sessionID)
+		if err := c.Summarize(ctx, sessionID); err != nil {
+			slog.Error("Failed to summarize conversation after context length exceeded", "error", err)
+			return nil, originalErr
+		}
+		slog.Info("Retrying request after summarization", "session", sessionID)
+		return run()
+	}
+
 	return result, originalErr
 }
 
@@ -432,6 +443,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	}
 
 	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg.WorkingDir()) {
+		slog.Debug("considering MCP tool", "tool", tool.Name(), "allowedMCP", agent.AllowedMCP)
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
 			filteredTools = append(filteredTools, tool)
@@ -861,6 +873,52 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 func (c *coordinator) isUnauthorized(err error) bool {
 	var providerErr *fantasy.ProviderError
 	return errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized
+}
+
+// isContextLengthExceeded checks if the error is due to exceeding the model's
+// context length / input token limit. Different providers return different
+// error messages for this condition.
+func (c *coordinator) isContextLengthExceeded(err error) bool {
+	var providerErr *fantasy.ProviderError
+	if !errors.As(err, &providerErr) {
+		return false
+	}
+
+	// Most providers return 400 Bad Request for context length errors.
+	if providerErr.StatusCode != http.StatusBadRequest {
+		return false
+	}
+
+	msg := strings.ToLower(providerErr.Message)
+
+	// Common patterns across providers:
+	// - OpenAI: "context_length_exceeded", "maximum context length"
+	// - Anthropic: "prompt is too long", "max_tokens", "input too long"
+	// - Google: "exceeds the maximum", "token limit"
+	// - Generic: "token", "context", "length", "limit", "exceeded"
+	contextLengthPatterns := []string{
+		"context_length_exceeded",
+		"context length",
+		"maximum context",
+		"max_tokens",
+		"prompt is too long",
+		"input too long",
+		"input is too long",
+		"exceeds the maximum",
+		"token limit",
+		"too many tokens",
+		"tokens exceed",
+		"exceeds.*token",
+		"request too large",
+	}
+
+	for _, pattern := range contextLengthPatterns {
+		if strings.Contains(msg, pattern) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {
