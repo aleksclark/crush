@@ -105,7 +105,7 @@ exports[`Version output snapshot › matches snapshot | 1`] = String.raw`
 │       ▀▀██████████▀▀                                                           │
 │           ▀▀▀▀▀▀                                                               │
 │                                                                                │
-│crush version v0.31.1-0.20260109191828-7b3333c70b88+dirty                       │
+│crush version v0.31.1-0.20260112005717-9975285d2b3c+dirty                       │
 │                                                                                │
 │                                                                                │
 │                                                                                │

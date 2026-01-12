@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
@@ -217,6 +218,16 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		if p.compact {
 			msg.Y -= 1
+		}
+		// Handle middle mouse click for X11-style paste.
+		if msg.Button == tea.MouseMiddle {
+			return p, func() tea.Msg {
+				content, err := clipboard.ReadAll()
+				if err != nil || content == "" {
+					return nil
+				}
+				return tea.PasteMsg{Content: content}
+			}
 		}
 		if p.isMouseOverChat(msg.X, msg.Y) {
 			p.focusedPane = PanelTypeChat
