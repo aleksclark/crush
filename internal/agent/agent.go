@@ -338,7 +338,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
-			// TODO: implement
+			slog.Info("Rate limited, retrying request",
+				"session_id", call.SessionID,
+				"status_code", err.StatusCode,
+				"delay", delay.Round(time.Millisecond).String(),
+				"error", err.Message,
+			)
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			toolCall := message.ToolCall{
@@ -472,10 +477,94 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				return nil, createErr
 			}
 		}
+
+		// Check if this is a rate-limit error that exhausted built-in retries.
+		// We'll wait with a longer backoff and retry once more.
+		if isRetryableError(err) {
+			// Extract the underlying error to check for rate limiting.
+			var retryErr *fantasy.RetryError
+			if errors.As(err, &retryErr) {
+				slog.Info("Rate limit retries exhausted, attempting extended backoff",
+					"session_id", call.SessionID,
+					"retry_count", len(retryErr.Errors),
+				)
+
+				// Wait for an extended period before retrying.
+				// Use a longer backoff (30 seconds) as a last resort.
+				const extendedBackoff = 30 * time.Second
+				slog.Info("Waiting before final retry attempt",
+					"session_id", call.SessionID,
+					"delay", extendedBackoff.String(),
+				)
+
+				select {
+				case <-time.After(extendedBackoff):
+					// Continue with retry.
+				case <-ctx.Done():
+					// Context cancelled, fall through to error handling.
+					goto handleError
+				}
+
+				// Update the message to save current state.
+				updateErr := a.messages.Update(ctx, *currentAssistant)
+				if updateErr != nil {
+					return nil, updateErr
+				}
+
+				// Release active request and retry.
+				a.activeRequests.Del(call.SessionID)
+				cancel()
+
+				slog.Info("Retrying after extended backoff", "session_id", call.SessionID)
+				return a.Run(ctx, call)
+			}
+		}
+
+	handleError:
 		var fantasyErr *fantasy.Error
 		var providerErr *fantasy.ProviderError
 		const defaultTitle = "Provider Error"
 		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
+
+		// Check if this is an "input too long" error that we can recover from
+		// by auto-summarizing and resuming.
+		if isInputTooLongError(err) && !a.disableAutoSummarize {
+			slog.Info("Input too long error detected, triggering auto-summarization", "session_id", call.SessionID)
+			// Update the message to save current state before summarizing.
+			updateErr := a.messages.Update(ctx, *currentAssistant)
+			if updateErr != nil {
+				return nil, updateErr
+			}
+			// Release active request before summarizing to avoid "session busy" error.
+			a.activeRequests.Del(call.SessionID)
+			// Summarize the conversation to reduce context size.
+			if summarizeErr := a.Summarize(ctx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
+				slog.Error("Failed to summarize after input too long error", "error", summarizeErr)
+				// Fall through to normal error handling if summarization fails.
+			} else {
+				// Queue the message for resumption after summarization.
+				existing, ok := a.messageQueue.Get(call.SessionID)
+				if !ok {
+					existing = []SessionAgentCall{}
+				}
+				call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+				existing = append(existing, call)
+				a.messageQueue.Set(call.SessionID, existing)
+
+				// Cancel and process queued messages.
+				cancel()
+
+				// Process queued messages.
+				queuedMessages, ok := a.messageQueue.Get(call.SessionID)
+				if ok && len(queuedMessages) > 0 {
+					firstQueuedMessage := queuedMessages[0]
+					a.messageQueue.Set(call.SessionID, queuedMessages[1:])
+					return a.Run(ctx, firstQueuedMessage)
+				}
+				return result, nil
+			}
+		}
+
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isPermissionErr {

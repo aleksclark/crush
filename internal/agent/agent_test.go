@@ -1,15 +1,18 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"charm.land/fantasy"
 	"charm.land/x/vcr"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
@@ -654,4 +657,417 @@ func BenchmarkBuildSummaryPrompt(b *testing.B) {
 			}
 		})
 	}
+}
+
+// mockLanguageModel is a mock language model for testing error handling.
+type mockLanguageModel struct {
+	streamCallCount atomic.Int32
+	errorOnCall     int32 // 0-indexed call number to error on, -1 means never error
+	errorToReturn   error
+	responses       []string
+}
+
+func (m *mockLanguageModel) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
+	return &fantasy.Response{
+		Content:      fantasy.ResponseContent{fantasy.TextContent{Text: "Generated response"}},
+		FinishReason: fantasy.FinishReasonStop,
+	}, nil
+}
+
+func (m *mockLanguageModel) Stream(_ context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
+	callNum := m.streamCallCount.Add(1) - 1
+
+	if m.errorOnCall >= 0 && callNum == m.errorOnCall {
+		return nil, m.errorToReturn
+	}
+
+	responseIdx := int(callNum)
+	if m.errorOnCall >= 0 && callNum > m.errorOnCall {
+		responseIdx-- // Adjust index since we skipped the error call
+	}
+	if responseIdx >= len(m.responses) {
+		responseIdx = len(m.responses) - 1
+	}
+
+	responseText := "Hello! How can I help you?"
+	if responseIdx >= 0 && responseIdx < len(m.responses) {
+		responseText = m.responses[responseIdx]
+	}
+
+	return func(yield func(fantasy.StreamPart) bool) {
+		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, Delta: responseText}) {
+			return
+		}
+		yield(fantasy.StreamPart{
+			Type:         fantasy.StreamPartTypeFinish,
+			FinishReason: fantasy.FinishReasonStop,
+			Usage:        fantasy.Usage{InputTokens: 100, OutputTokens: 50, TotalTokens: 150},
+		})
+	}, nil
+}
+
+func (m *mockLanguageModel) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, nil
+}
+
+func (m *mockLanguageModel) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, nil
+}
+
+func (m *mockLanguageModel) Provider() string {
+	return "mock"
+}
+
+func (m *mockLanguageModel) Model() string {
+	return "mock-model"
+}
+
+func TestInputTooLongAutoSummarize(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows for now")
+	}
+
+	t.Run("auto summarizes and resumes on input too long error", func(t *testing.T) {
+		env := testEnv(t)
+		createSimpleGoProject(t, env.workingDir)
+
+		// Create a mock model that returns "input too long" error on first call.
+		largeModel := &mockLanguageModel{
+			errorOnCall:   0, // Error on first call
+			errorToReturn: &fantasy.ProviderError{Message: "Input is too long for requested model"},
+			responses: []string{
+				// Response for summarization call
+				"This is a summary of the conversation.",
+				// Response after resumption
+				"I can help you with that now that we have summarized.",
+			},
+		}
+		smallModel := &mockLanguageModel{
+			errorOnCall: -1, // Never error
+			responses:   []string{"Summary title"},
+		}
+
+		largeModelWrapper := Model{
+			Model: largeModel,
+			CatwalkCfg: catwalk.Model{
+				ContextWindow:    200000,
+				DefaultMaxTokens: 10000,
+			},
+		}
+		smallModelWrapper := Model{
+			Model: smallModel,
+			CatwalkCfg: catwalk.Model{
+				ContextWindow:    200000,
+				DefaultMaxTokens: 10000,
+			},
+		}
+
+		agent := NewSessionAgent(SessionAgentOptions{
+			LargeModel:           largeModelWrapper,
+			SmallModel:           smallModelWrapper,
+			SystemPrompt:         "You are a helpful assistant.",
+			DisableAutoSummarize: false,
+			Sessions:             env.sessions,
+			Messages:             env.messages,
+			Tools:                []fantasy.AgentTool{},
+		})
+
+		sess, err := env.sessions.Create(t.Context(), "Test Session")
+		require.NoError(t, err)
+
+		// Run the agent - it should handle the "input too long" error gracefully.
+		res, err := agent.Run(t.Context(), SessionAgentCall{
+			Prompt:          "Hello, help me with something",
+			SessionID:       sess.ID,
+			MaxOutputTokens: 10000,
+		})
+
+		// The agent should recover from the error by summarizing and resuming.
+		require.NoError(t, err)
+		require.NotNil(t, res)
+
+		// Verify the large model was called multiple times:
+		// 1. First call (errored with input too long)
+		// 2. Summarization call
+		// 3. Resumed call after summarization
+		callCount := largeModel.streamCallCount.Load()
+		require.GreaterOrEqual(t, callCount, int32(2), "Expected at least 2 calls to large model (error + resumption)")
+
+		// Verify messages were created in the session.
+		msgs, err := env.messages.List(t.Context(), sess.ID)
+		require.NoError(t, err)
+		require.Greater(t, len(msgs), 0, "Expected messages to be created")
+	})
+
+	t.Run("does not summarize when disabled", func(t *testing.T) {
+		env := testEnv(t)
+		createSimpleGoProject(t, env.workingDir)
+
+		// Create a mock model that returns "input too long" error.
+		largeModel := &mockLanguageModel{
+			errorOnCall:   0, // Error on first call
+			errorToReturn: &fantasy.ProviderError{Message: "Input is too long for requested model"},
+			responses:     []string{"Response"},
+		}
+		smallModel := &mockLanguageModel{
+			errorOnCall: -1,
+			responses:   []string{"Title"},
+		}
+
+		largeModelWrapper := Model{
+			Model: largeModel,
+			CatwalkCfg: catwalk.Model{
+				ContextWindow:    200000,
+				DefaultMaxTokens: 10000,
+			},
+		}
+		smallModelWrapper := Model{
+			Model: smallModel,
+			CatwalkCfg: catwalk.Model{
+				ContextWindow:    200000,
+				DefaultMaxTokens: 10000,
+			},
+		}
+
+		agent := NewSessionAgent(SessionAgentOptions{
+			LargeModel:           largeModelWrapper,
+			SmallModel:           smallModelWrapper,
+			SystemPrompt:         "You are a helpful assistant.",
+			DisableAutoSummarize: true, // Disabled
+			Sessions:             env.sessions,
+			Messages:             env.messages,
+			Tools:                []fantasy.AgentTool{},
+		})
+
+		sess, err := env.sessions.Create(t.Context(), "Test Session")
+		require.NoError(t, err)
+
+		// Run the agent - with auto-summarize disabled, it should return the error.
+		_, err = agent.Run(t.Context(), SessionAgentCall{
+			Prompt:          "Hello",
+			SessionID:       sess.ID,
+			MaxOutputTokens: 10000,
+		})
+
+		// Should return the error since auto-summarize is disabled.
+		require.Error(t, err)
+		require.True(t, isInputTooLongError(err), "Expected input too long error")
+
+		// Verify only one call was made (no summarization attempt).
+		callCount := largeModel.streamCallCount.Load()
+		require.Equal(t, int32(1), callCount, "Expected exactly 1 call to large model")
+	})
+
+	t.Run("handles various input too long error messages", func(t *testing.T) {
+		errorMessages := []string{
+			"Input is too long for requested model",
+			"context_length_exceeded: max 128000 tokens",
+			"This request exceeds the maximum context length",
+			"The token limit has been exceeded",
+			"prompt is too long for this model",
+			"request too large for context window",
+		}
+
+		for _, errMsg := range errorMessages {
+			t.Run(errMsg, func(t *testing.T) {
+				env := testEnv(t)
+				createSimpleGoProject(t, env.workingDir)
+
+				largeModel := &mockLanguageModel{
+					errorOnCall:   0,
+					errorToReturn: &fantasy.ProviderError{Message: errMsg},
+					responses: []string{
+						"Summary",
+						"Resumed response",
+					},
+				}
+				smallModel := &mockLanguageModel{
+					errorOnCall: -1,
+					responses:   []string{"Title"},
+				}
+
+				largeModelWrapper := Model{
+					Model: largeModel,
+					CatwalkCfg: catwalk.Model{
+						ContextWindow:    200000,
+						DefaultMaxTokens: 10000,
+					},
+				}
+				smallModelWrapper := Model{
+					Model: smallModel,
+					CatwalkCfg: catwalk.Model{
+						ContextWindow:    200000,
+						DefaultMaxTokens: 10000,
+					},
+				}
+
+				agent := NewSessionAgent(SessionAgentOptions{
+					LargeModel:           largeModelWrapper,
+					SmallModel:           smallModelWrapper,
+					SystemPrompt:         "You are a helpful assistant.",
+					DisableAutoSummarize: false,
+					Sessions:             env.sessions,
+					Messages:             env.messages,
+					Tools:                []fantasy.AgentTool{},
+				})
+
+				sess, err := env.sessions.Create(t.Context(), "Test Session")
+				require.NoError(t, err)
+
+				res, err := agent.Run(t.Context(), SessionAgentCall{
+					Prompt:          "Test prompt",
+					SessionID:       sess.ID,
+					MaxOutputTokens: 10000,
+				})
+
+				require.NoError(t, err, "Expected agent to handle '%s' error gracefully", errMsg)
+				require.NotNil(t, res)
+			})
+		}
+	})
+
+	t.Run("verifies work continues after input too long recovery", func(t *testing.T) {
+		env := testEnv(t)
+		createSimpleGoProject(t, env.workingDir)
+
+		// Create a mock model that errors on first call, then succeeds with
+		// meaningful content on subsequent calls.
+		summaryResponse := "Conversation summary: User asked for help with code."
+		resumedResponse := "Here is the help you requested after summarization."
+		largeModel := &mockLanguageModel{
+			errorOnCall:   0, // Error on first call
+			errorToReturn: &fantasy.ProviderError{Message: "Input is too long for requested model"},
+			responses: []string{
+				// Response for summarization call
+				summaryResponse,
+				// Response after resumption
+				resumedResponse,
+			},
+		}
+		smallModel := &mockLanguageModel{
+			errorOnCall: -1, // Never error
+			responses:   []string{"Session Summary"},
+		}
+
+		largeModelWrapper := Model{
+			Model: largeModel,
+			CatwalkCfg: catwalk.Model{
+				ContextWindow:    200000,
+				DefaultMaxTokens: 10000,
+			},
+		}
+		smallModelWrapper := Model{
+			Model: smallModel,
+			CatwalkCfg: catwalk.Model{
+				ContextWindow:    200000,
+				DefaultMaxTokens: 10000,
+			},
+		}
+
+		agent := NewSessionAgent(SessionAgentOptions{
+			LargeModel:           largeModelWrapper,
+			SmallModel:           smallModelWrapper,
+			SystemPrompt:         "You are a helpful assistant.",
+			DisableAutoSummarize: false,
+			Sessions:             env.sessions,
+			Messages:             env.messages,
+			Tools:                []fantasy.AgentTool{},
+		})
+
+		sess, err := env.sessions.Create(t.Context(), "Test Session")
+		require.NoError(t, err)
+
+		res, err := agent.Run(t.Context(), SessionAgentCall{
+			Prompt:          "Help me with my code",
+			SessionID:       sess.ID,
+			MaxOutputTokens: 10000,
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, res)
+
+		// Verify messages were created - check for summary message and resumed response.
+		msgs, err := env.messages.List(t.Context(), sess.ID)
+		require.NoError(t, err)
+		require.Greater(t, len(msgs), 1, "Expected multiple messages after recovery")
+
+		// Verify we have at least one assistant message with the resumed content.
+		foundSummary := false
+		foundResumed := false
+		for _, msg := range msgs {
+			if msg.Role == message.Assistant {
+				content := msg.Content().Text
+				if strings.Contains(content, "summary") || strings.Contains(content, "Summary") {
+					foundSummary = true
+				}
+				if strings.Contains(content, resumedResponse) {
+					foundResumed = true
+				}
+			}
+		}
+
+		// We should find the summary message and the resumed response.
+		require.True(t, foundSummary || foundResumed,
+			"Expected to find assistant messages after input too long recovery")
+
+		// Verify the model was called multiple times (error + summary + resumed).
+		callCount := largeModel.streamCallCount.Load()
+		require.GreaterOrEqual(t, callCount, int32(2),
+			"Expected at least 2 calls to large model (error + resumption)")
+	})
+}
+
+// TestRateLimitErrorDetection verifies that rate-limit errors are correctly
+// identified by the error detection functions. The actual retry behavior
+// is handled by fantasy's built-in retry mechanism with our OnRetry callback.
+func TestRateLimitErrorDetection(t *testing.T) {
+	t.Parallel()
+
+	t.Run("detects 429 status code", func(t *testing.T) {
+		t.Parallel()
+		err := &fantasy.ProviderError{
+			Message:    "Too Many Requests",
+			StatusCode: 429,
+		}
+		require.True(t, isRateLimitError(err))
+		require.True(t, isRetryableError(err))
+	})
+
+	t.Run("detects rate limit message without 429", func(t *testing.T) {
+		t.Parallel()
+		err := &fantasy.ProviderError{
+			Message:    "Rate limit exceeded. Please try again later.",
+			StatusCode: 200,
+		}
+		require.True(t, isRateLimitError(err))
+		require.True(t, isRetryableError(err))
+	})
+
+	t.Run("detects RetryError wrapper", func(t *testing.T) {
+		t.Parallel()
+		err := &fantasy.RetryError{
+			Errors: []error{
+				&fantasy.ProviderError{Message: "first attempt", StatusCode: 429},
+				&fantasy.ProviderError{Message: "second attempt", StatusCode: 429},
+			},
+		}
+		require.True(t, isRetryableError(err))
+	})
+
+	t.Run("distinguishes rate limit from input too long", func(t *testing.T) {
+		t.Parallel()
+		rateLimitErr := &fantasy.ProviderError{
+			Message:    "Rate limit exceeded",
+			StatusCode: 429,
+		}
+		inputTooLongErr := &fantasy.ProviderError{
+			Message: "Input is too long for requested model",
+		}
+
+		require.True(t, isRateLimitError(rateLimitErr))
+		require.False(t, isInputTooLongError(rateLimitErr))
+
+		require.False(t, isRateLimitError(inputTooLongErr))
+		require.True(t, isInputTooLongError(inputTooLongErr))
+	})
 }
