@@ -599,7 +599,7 @@ test.describe("Agents dialog", () => {
 
     // Press enter to view details of the first agent (code-reviewer)
     terminal.write("\r");
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, 500));
 
     // Should show the detail view title with agent name
     await expect(

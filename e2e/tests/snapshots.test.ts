@@ -35,9 +35,15 @@ test.describe("Version output snapshot", () => {
     cols: 80,
   });
 
-  test("matches snapshot", async ({ terminal }) => {
+  test("matches version format", async ({ terminal }) => {
+    // Wait for version text to be visible
     await expect(terminal.getByText("version", { full: true })).toBeVisible();
-    await expect(terminal).toMatchSnapshot("version-output.txt");
+    
+    // Check that the version matches the expected format: v0.32.2-0.20260115130311-861e8fb77b67+dirty
+    // Pattern: v<semver>-<timestamp>-<commit>+<dirty>?
+    const buffer = terminal.getBuffer();
+    const output = buffer.map(row => row.join("")).join("\n");
+    expect(output).toMatch(/crush version v\d+\.\d+\.\d+-\d+\.\d+-[a-f0-9]+(\+dirty)?/);
   });
 });
 
