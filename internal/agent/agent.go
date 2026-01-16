@@ -31,6 +31,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/agent/openaiextended"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -753,6 +754,9 @@ func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
 		},
 		bedrock.Name: &anthropic.ProviderCacheControlOptions{
 			CacheControl: anthropic.CacheControl{Type: "ephemeral"},
+		},
+		openaiextended.Name: &openaiextended.ProviderOptions{
+			CacheControl: &openaiextended.CacheControl{Type: "ephemeral"},
 		},
 	}
 }

@@ -496,10 +496,14 @@
           "enum": [
             "openai",
             "openai-compat",
+            "openai-extended",
             "anthropic",
             "gemini",
             "azure",
-            "vertexai"
+            "vertexai",
+            "bedrock",
+            "openrouter",
+            "hyper"
           ],
           "description": "Provider type that determines the API format",
           "default": "openai"

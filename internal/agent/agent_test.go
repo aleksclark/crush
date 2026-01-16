@@ -38,6 +38,11 @@ func getModels(t *testing.T, r *vcr.Recorder, pair modelPair) (fantasy.LanguageM
 }
 
 func setupAgent(t *testing.T, pair modelPair) (SessionAgent, fakeEnv) {
+	// Skip zai tests if API key is not set.
+	if strings.HasPrefix(pair.name, "zai") && os.Getenv("CRUSH_ZAI_API_KEY") == "" {
+		t.Skip("skipping zai tests: CRUSH_ZAI_API_KEY not set")
+	}
+
 	r := vcr.NewRecorder(t)
 	large, small := getModels(t, r, pair)
 	env := testEnv(t)
