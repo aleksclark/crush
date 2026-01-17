@@ -199,9 +199,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	var wg sync.WaitGroup
 	// Generate title if first message.
 	if len(msgs) == 0 {
-		titleCtx := ctx // Copy to avoid race with ctx reassignment below.
+		titleCtx := ctx           // Copy to avoid race with ctx reassignment below.
+		titlePrompt := call.Prompt // Copy to avoid race with call.Prompt modification.
 		wg.Go(func() {
-			a.generateTitle(titleCtx, call.SessionID, call.Prompt)
+			a.generateTitle(titleCtx, call.SessionID, titlePrompt)
 		})
 	}
 	defer wg.Wait()
