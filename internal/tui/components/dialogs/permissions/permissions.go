@@ -451,6 +451,8 @@ func (p *permissionDialogCmp) getOrGenerateContent() string {
 		content = p.generateViewContent()
 	case tools.LSToolName:
 		content = p.generateLSContent()
+	case tools.DeleteToolName:
+		content = p.generateDeleteContent()
 	default:
 		content = p.generateDefaultContent()
 	}
@@ -648,6 +650,30 @@ func (p *permissionDialogCmp) generateLSContent() string {
 		content := fmt.Sprintf("Directory: %s", fsext.PrettyPath(pr.Path))
 		if len(pr.Ignore) > 0 {
 			content += fmt.Sprintf("\nIgnore patterns: %s", strings.Join(pr.Ignore, ", "))
+		}
+
+		finalContent := baseStyle.
+			Padding(1, 2).
+			Width(p.contentViewPort.Width()).
+			Render(content)
+		return finalContent
+	}
+	return ""
+}
+
+func (p *permissionDialogCmp) generateDeleteContent() string {
+	t := styles.CurrentTheme()
+	baseStyle := t.S().Base.Background(t.BgSubtle)
+	if pr, ok := p.permission.Params.(tools.DeletePermissionsParams); ok {
+		var typeStr string
+		if pr.IsDir {
+			typeStr = "Directory"
+		} else {
+			typeStr = "File"
+		}
+		content := fmt.Sprintf("%s: %s", typeStr, fsext.PrettyPath(pr.FilePath))
+		if pr.Recursive {
+			content += "\nRecursive: true (will delete all contents)"
 		}
 
 		finalContent := baseStyle.

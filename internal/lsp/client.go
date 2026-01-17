@@ -499,6 +499,49 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 	return c.client.FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
 }
 
+// CloseFile closes a file in the LSP server.
+func (c *Client) CloseFile(ctx context.Context, filepath string) error {
+	uri := string(protocol.URIFromPath(filepath))
+
+	if _, exists := c.openFiles.Get(uri); !exists {
+		return nil // File is not open, nothing to do
+	}
+
+	if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
+		return fmt.Errorf("error closing file: %w", err)
+	}
+
+	c.openFiles.Del(uri)
+	return nil
+}
+
+// NotifyFileDeleted notifies the LSP server that a file has been deleted.
+func (c *Client) NotifyFileDeleted(ctx context.Context, filepath string) error {
+	uri := protocol.URIFromPath(filepath)
+
+	// Clear any diagnostics for the deleted file.
+	c.ClearDiagnosticsForURI(uri)
+
+	// Notify the server about the file change via workspace/didChangeWatchedFiles.
+	changes := []protocol.FileEvent{
+		{
+			URI:  uri,
+			Type: protocol.Deleted,
+		},
+	}
+
+	return c.client.NotifyDidChangeWatchedFiles(ctx, changes)
+}
+
+// OpenFiles returns a list of all currently open file URIs.
+func (c *Client) OpenFiles() []string {
+	var files []string
+	for uri := range c.openFiles.Seq2() {
+		files = append(files, uri)
+	}
+	return files
+}
+
 // HasRootMarkers checks if any of the specified root marker patterns exist in the given directory.
 // Uses glob patterns to match files, allowing for more flexible matching.
 func HasRootMarkers(dir string, rootMarkers []string) bool {

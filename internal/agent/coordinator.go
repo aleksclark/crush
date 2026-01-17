@@ -420,6 +420,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, permis
 		tools.NewBashTool(permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
+		tools.NewDeleteTool(c.lspClients, permissions, c.history, c.cfg.WorkingDir()),
 		tools.NewDownloadTool(permissions, c.cfg.WorkingDir(), nil),
 		tools.NewEditTool(c.lspClients, permissions, c.history, c.cfg.WorkingDir()),
 		tools.NewMultiEditTool(c.lspClients, permissions, c.history, c.cfg.WorkingDir()),
