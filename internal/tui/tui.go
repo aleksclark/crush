@@ -29,10 +29,12 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/agents"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/mcpservers"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/sessions"
+	skillsdialog "github.com/charmbracelet/crush/internal/tui/components/dialogs/skills"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -279,6 +281,23 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			subagents := a.app.ListSubagents()
 			return dialogs.OpenDialogMsg{
 				Model: agents.NewAgentsDialogCmp(subagents),
+			}
+		}
+	case commands.OpenMCPServersDialogMsg:
+		if a.dialog.ActiveDialogID() == mcpservers.MCPServersDialogID {
+			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: mcpservers.NewMCPServersDialogCmp(context.Background()),
+		})
+	case commands.OpenSkillsDialogMsg:
+		if a.dialog.ActiveDialogID() == skillsdialog.SkillsDialogID {
+			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		return a, func() tea.Msg {
+			skillsList := a.app.ListSkills()
+			return dialogs.OpenDialogMsg{
+				Model: skillsdialog.NewSkillsDialogCmp(skillsList),
 			}
 		}
 	case commands.ToggleHelpMsg:
@@ -573,6 +592,33 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			subagents := a.app.ListSubagents()
 			return dialogs.OpenDialogMsg{
 				Model: agents.NewAgentsDialogCmp(subagents),
+			}
+		}
+	case key.Matches(msg, a.keyMap.MCPServers):
+		// MCP Servers dialog - view and manage MCP servers.
+		if a.dialog.ActiveDialogID() == mcpservers.MCPServersDialogID {
+			return util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		if a.dialog.HasDialogs() {
+			return nil
+		}
+		return func() tea.Msg {
+			return dialogs.OpenDialogMsg{
+				Model: mcpservers.NewMCPServersDialogCmp(context.Background()),
+			}
+		}
+	case key.Matches(msg, a.keyMap.Skills):
+		// Skills dialog - view discovered skills.
+		if a.dialog.ActiveDialogID() == skillsdialog.SkillsDialogID {
+			return util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		if a.dialog.HasDialogs() {
+			return nil
+		}
+		return func() tea.Msg {
+			skillsList := a.app.ListSkills()
+			return dialogs.OpenDialogMsg{
+				Model: skillsdialog.NewSkillsDialogCmp(skillsList),
 			}
 		}
 	case key.Matches(msg, a.keyMap.Suspend):

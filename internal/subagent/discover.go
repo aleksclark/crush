@@ -92,7 +92,6 @@ func Discover(paths []string) []*Subagent {
 			slog.Info("Discovered subagent", "name", subagent.Name, "path", path, "priority", subagent.Priority)
 			return nil
 		})
-
 		if err != nil {
 			slog.Warn("Error walking path", "path", basePath, "error", err)
 		}

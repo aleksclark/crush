@@ -78,8 +78,9 @@ type Event struct {
 
 // Counts number of available tools, prompts, etc.
 type Counts struct {
-	Tools   int
-	Prompts int
+	Tools     int
+	Prompts   int
+	Resources int
 }
 
 // ClientInfo holds information about an MCP client's state
@@ -105,6 +106,120 @@ func GetStates() map[string]ClientInfo {
 // GetState returns the state of a specific MCP client
 func GetState(name string) (ClientInfo, bool) {
 	return states.Get(name)
+}
+
+// RestartServer restarts a specific MCP server.
+func RestartServer(ctx context.Context, name string) error {
+	cfg := config.Get()
+	m, ok := cfg.MCP[name]
+	if !ok {
+		return fmt.Errorf("mcp '%s' not found in configuration", name)
+	}
+
+	// Close existing session if present.
+	if sess, ok := sessions.Get(name); ok {
+		_ = sess.Close()
+		sessions.Del(name)
+	}
+
+	if m.Disabled {
+		updateState(name, StateDisabled, nil, nil, Counts{})
+		return nil
+	}
+
+	updateState(name, StateStarting, nil, nil, Counts{})
+
+	session, err := createSession(ctx, name, m, cfg.Resolver())
+	if err != nil {
+		return err
+	}
+
+	tools, err := getTools(ctx, session)
+	if err != nil {
+		slog.Error("error listing tools", "error", err)
+		updateState(name, StateError, err, nil, Counts{})
+		session.Close()
+		return err
+	}
+
+	prompts, err := getPrompts(ctx, session)
+	if err != nil {
+		slog.Error("error listing prompts", "error", err)
+		updateState(name, StateError, err, nil, Counts{})
+		session.Close()
+		return err
+	}
+
+	resources, err := getResources(ctx, session)
+	if err != nil {
+		slog.Error("error listing resources", "error", err)
+		// Resources are optional, so we don't fail.
+	}
+
+	toolCount := updateTools(name, tools)
+	slog.Info("MCP tools registered", "name", name, "count", toolCount)
+	updatePrompts(name, prompts)
+	updateResources(name, resources)
+	sessions.Set(name, session)
+
+	updateState(name, StateConnected, nil, session, Counts{
+		Tools:     toolCount,
+		Prompts:   len(prompts),
+		Resources: len(resources),
+	})
+
+	return nil
+}
+
+// StopServer stops a specific MCP server.
+func StopServer(name string) error {
+	sess, ok := sessions.Get(name)
+	if !ok {
+		return nil
+	}
+
+	if err := sess.Close(); err != nil &&
+		!errors.Is(err, io.EOF) &&
+		!errors.Is(err, context.Canceled) {
+		slog.Warn("Failed to shutdown MCP client", "name", name, "error", err)
+	}
+
+	sessions.Del(name)
+	allTools.Del(name)
+	allPrompts.Del(name)
+	allResources.Del(name)
+	states.Del(name)
+
+	return nil
+}
+
+// GetServerConfig returns the configuration for a specific MCP server.
+func GetServerConfig(name string) (config.MCPConfig, bool) {
+	cfg := config.Get()
+	m, ok := cfg.MCP[name]
+	return m, ok
+}
+
+// GetAllServerNames returns the names of all configured MCP servers.
+func GetAllServerNames() []string {
+	cfg := config.Get()
+	names := make([]string, 0, len(cfg.MCP))
+	for name := range cfg.MCP {
+		names = append(names, name)
+	}
+	return names
+}
+
+// GetTools returns tools for a specific MCP server.
+func GetTools(name string) []*Tool {
+	tools, _ := allTools.Get(name)
+	return tools
+}
+
+// GetPrompts returns prompts for a specific MCP server.
+func GetPrompts(name string) []*Prompt {
+	prompts, _ := allPrompts.Get(name)
+	return prompts
 }
 
 // Close closes all MCP clients. This should be called during application shutdown.
@@ -188,14 +303,22 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 				return
 			}
 
+			resources, err := getResources(ctx, session)
+			if err != nil {
+				slog.Error("error listing resources", "error", err)
+				// Resources are optional, so we don't fail the connection.
+			}
+
 			toolCount := updateTools(name, tools)
 			slog.Info("MCP tools registered", "name", name, "count", toolCount)
 			updatePrompts(name, prompts)
+			updateResources(name, resources)
 			sessions.Set(name, session)
 
 			updateState(name, StateConnected, nil, session, Counts{
-				Tools:   toolCount,
-				Prompts: len(prompts),
+				Tools:     toolCount,
+				Prompts:   len(prompts),
+				Resources: len(resources),
 			})
 		}(name, m)
 	}

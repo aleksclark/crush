@@ -39,8 +39,8 @@ import (
 	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
-	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
+	"github.com/charmbracelet/crush/internal/agent/openaiextended"
 	openaisdk "github.com/openai/openai-go/v2/option"
 	"github.com/qjebbs/go-jsons"
 )
@@ -318,14 +318,14 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if err == nil {
 			options[google.Name] = parsed
 		}
-	case openaicompat.Name:
+	case openaiextended.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
 		}
-		parsed, err := openaicompat.ParseOptions(mergedOptions)
+		parsed, err := openaiextended.ParseOptions(mergedOptions)
 		if err == nil {
-			options[openaicompat.Name] = parsed
+			options[openaiextended.Name] = parsed
 		}
 	}
 
@@ -615,32 +615,32 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 }
 
 func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent bool) (fantasy.Provider, error) {
-	opts := []openaicompat.Option{
-		openaicompat.WithBaseURL(baseURL),
-		openaicompat.WithAPIKey(apiKey),
+	opts := []openaiextended.Option{
+		openaiextended.WithBaseURL(baseURL),
+		openaiextended.WithAPIKey(apiKey),
 	}
 
 	// Set HTTP client based on provider and debug mode.
 	var httpClient *http.Client
 	if providerID == string(catwalk.InferenceProviderCopilot) {
-		opts = append(opts, openaicompat.WithUseResponsesAPI())
+		opts = append(opts, openaiextended.WithUseResponsesAPI())
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Options.Debug)
 	} else if c.cfg.Options.Debug {
 		httpClient = log.NewHTTPClient()
 	}
 	if httpClient != nil {
-		opts = append(opts, openaicompat.WithHTTPClient(httpClient))
+		opts = append(opts, openaiextended.WithHTTPClient(httpClient))
 	}
 
 	if len(headers) > 0 {
-		opts = append(opts, openaicompat.WithHeaders(headers))
+		opts = append(opts, openaiextended.WithHeaders(headers))
 	}
 
 	for extraKey, extraValue := range extraBody {
-		opts = append(opts, openaicompat.WithSDKOptions(openaisdk.WithJSONSet(extraKey, extraValue)))
+		opts = append(opts, openaiextended.WithSDKOptions(openaisdk.WithJSONSet(extraKey, extraValue)))
 	}
 
-	return openaicompat.New(opts...)
+	return openaiextended.New(opts...)
 }
 
 func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[string]string, options map[string]string) (fantasy.Provider, error) {
@@ -779,7 +779,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
 	case "google-vertex":
 		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
-	case openaicompat.Name:
+	case openaiextended.Name:
 		if providerCfg.ID == string(catwalk.InferenceProviderZAI) {
 			if providerCfg.ExtraBody == nil {
 				providerCfg.ExtraBody = map[string]any{}

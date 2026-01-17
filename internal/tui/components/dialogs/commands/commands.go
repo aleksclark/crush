@@ -70,19 +70,21 @@ type commandDialogCmp struct {
 }
 
 type (
-	SwitchSessionsMsg      struct{}
-	NewSessionsMsg         struct{}
-	SwitchModelMsg         struct{}
-	QuitMsg                struct{}
-	OpenFilePickerMsg      struct{}
-	ToggleHelpMsg          struct{}
-	ToggleCompactModeMsg   struct{}
-	ToggleThinkingMsg      struct{}
-	OpenReasoningDialogMsg struct{}
-	OpenExternalEditorMsg  struct{}
-	ToggleYoloModeMsg      struct{}
-	OpenAgentsDialogMsg    struct{}
-	CompactMsg             struct {
+	SwitchSessionsMsg       struct{}
+	NewSessionsMsg          struct{}
+	SwitchModelMsg          struct{}
+	QuitMsg                 struct{}
+	OpenFilePickerMsg       struct{}
+	ToggleHelpMsg           struct{}
+	ToggleCompactModeMsg    struct{}
+	ToggleThinkingMsg       struct{}
+	OpenReasoningDialogMsg  struct{}
+	OpenExternalEditorMsg   struct{}
+	ToggleYoloModeMsg       struct{}
+	OpenAgentsDialogMsg     struct{}
+	OpenMCPServersDialogMsg struct{}
+	OpenSkillsDialogMsg     struct{}
+	CompactMsg              struct {
 		SessionID string
 	}
 )
@@ -441,6 +443,24 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			Shortcut:    "ctrl+a",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(OpenAgentsDialogMsg{})
+			},
+		},
+		{
+			ID:          "mcp_servers",
+			Title:       "MCP Servers",
+			Description: "View and manage MCP servers",
+			Shortcut:    "ctrl+e",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(OpenMCPServersDialogMsg{})
+			},
+		},
+		{
+			ID:          "skills",
+			Title:       "Skills",
+			Description: "View discovered agent skills",
+			Shortcut:    "ctrl+k",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(OpenSkillsDialogMsg{})
 			},
 		},
 		{

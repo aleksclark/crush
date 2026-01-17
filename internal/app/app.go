@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -32,6 +33,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/subagent"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -461,6 +463,19 @@ func (app *App) ListSubagents() []*subagent.Subagent {
 		return nil
 	}
 	return app.AgentCoordinator.ListSubagents()
+}
+
+// ListSkills returns all discovered skills from configured paths.
+func (app *App) ListSkills() []*skills.Skill {
+	cfg := app.Config()
+	if len(cfg.Options.SkillsPaths) == 0 {
+		return nil
+	}
+	expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
+	for _, pth := range cfg.Options.SkillsPaths {
+		expandedPaths = append(expandedPaths, home.Long(pth))
+	}
+	return skills.Discover(expandedPaths)
 }
 
 // Subscribe sends events to the TUI as tea.Msgs.

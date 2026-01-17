@@ -5,13 +5,15 @@ import (
 )
 
 type KeyMap struct {
-	Quit     key.Binding
-	Help     key.Binding
-	Commands key.Binding
-	Suspend  key.Binding
-	Models   key.Binding
-	Sessions key.Binding
-	Agents   key.Binding
+	Quit       key.Binding
+	Help       key.Binding
+	Commands   key.Binding
+	Suspend    key.Binding
+	Models     key.Binding
+	Sessions   key.Binding
+	Agents     key.Binding
+	MCPServers key.Binding
+	Skills     key.Binding
 
 	pageBindings []key.Binding
 }
@@ -45,6 +47,14 @@ func DefaultKeyMap() KeyMap {
 		Agents: key.NewBinding(
 			key.WithKeys("ctrl+a"),
 			key.WithHelp("ctrl+a", "agents"),
+		),
+		MCPServers: key.NewBinding(
+			key.WithKeys("ctrl+e"),
+			key.WithHelp("ctrl+e", "mcp"),
+		),
+		Skills: key.NewBinding(
+			key.WithKeys("ctrl+k"),
+			key.WithHelp("ctrl+k", "skills"),
 		),
 	}
 }

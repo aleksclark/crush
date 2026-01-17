@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
@@ -913,6 +914,9 @@ func (p *chatPage) setSession(sess session.Session) tea.Cmd {
 	var cmds []tea.Cmd
 	p.session = sess
 
+	// Set the MCP session ID for logging purposes.
+	mcp.SetSessionID(sess.ID)
+
 	// Update the working directory based on the session. If the session has a
 	// custom working directory (e.g., from worktree mode), use that. Otherwise,
 	// use the original working directory from when crush was launched.
@@ -1299,6 +1303,14 @@ func (p *chatPage) Help() help.KeyMap {
 			key.NewBinding(
 				key.WithKeys("ctrl+s"),
 				key.WithHelp("ctrl+s", "sessions"),
+			),
+			key.NewBinding(
+				key.WithKeys("ctrl+e"),
+				key.WithHelp("ctrl+e", "mcp servers"),
+			),
+			key.NewBinding(
+				key.WithKeys("ctrl+k"),
+				key.WithHelp("ctrl+k", "skills"),
 			),
 		)
 		if p.session.ID != "" {

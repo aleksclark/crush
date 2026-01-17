@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -33,6 +34,7 @@ func Tools() iter.Seq2[string, []*Tool] {
 
 // RunTool runs an MCP tool with the given input parameters.
 func RunTool(ctx context.Context, name, toolName string, input string) (ToolResult, error) {
+	startTime := time.Now()
 	var args map[string]any
 	if err := json.Unmarshal([]byte(input), &args); err != nil {
 		return ToolResult{}, fmt.Errorf("error parsing parameters: %s", err)
@@ -40,6 +42,7 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 
 	c, err := getOrRenewClient(ctx, name)
 	if err != nil {
+		logToolInvocation(name, toolName, input, "", err, startTime)
 		return ToolResult{}, err
 	}
 	result, err := c.CallTool(ctx, &mcp.CallToolParams{
@@ -47,10 +50,12 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 		Arguments: args,
 	})
 	if err != nil {
+		logToolInvocation(name, toolName, input, "", err, startTime)
 		return ToolResult{}, err
 	}
 
 	if len(result.Content) == 0 {
+		logToolInvocation(name, toolName, input, "", nil, startTime)
 		return ToolResult{Type: "text", Content: ""}, nil
 	}
 
@@ -83,6 +88,7 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 
 	// MCP SDK returns Data as already base64-encoded, so we use it directly.
 	if imageData != nil {
+		logToolInvocation(name, toolName, input, textContent, nil, startTime)
 		return ToolResult{
 			Type:      "image",
 			Content:   textContent,
@@ -92,6 +98,7 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 	}
 
 	if audioData != nil {
+		logToolInvocation(name, toolName, input, textContent, nil, startTime)
 		return ToolResult{
 			Type:      "media",
 			Content:   textContent,
@@ -100,10 +107,28 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 		}, nil
 	}
 
+	logToolInvocation(name, toolName, input, textContent, nil, startTime)
 	return ToolResult{
 		Type:    "text",
 		Content: textContent,
 	}, nil
+}
+
+// logToolInvocation logs an MCP tool invocation with timing information.
+func logToolInvocation(serverName, toolName, input, output string, err error, startTime time.Time) {
+	entry := LogEntry{
+		Timestamp:  time.Now(),
+		ServerName: serverName,
+		ToolName:   toolName,
+		Input:      input,
+		Output:     output,
+		DurationMs: time.Since(startTime).Milliseconds(),
+		Success:    err == nil,
+	}
+	if err != nil {
+		entry.Error = err.Error()
+	}
+	LogInvocation(entry)
 }
 
 // RefreshTools gets the updated list of tools from the MCP and updates the

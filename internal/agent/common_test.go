@@ -11,10 +11,10 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/openai"
-	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/x/vcr"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/agent/openaiextended"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -89,10 +89,10 @@ func openRouterBuilder(model string) builderFunc {
 
 func zAIBuilder(model string) builderFunc {
 	return func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error) {
-		provider, err := openaicompat.New(
-			openaicompat.WithBaseURL("https://api.z.ai/api/coding/paas/v4"),
-			openaicompat.WithAPIKey(os.Getenv("CRUSH_ZAI_API_KEY")),
-			openaicompat.WithHTTPClient(&http.Client{Transport: r}),
+		provider, err := openaiextended.New(
+			openaiextended.WithBaseURL("https://api.z.ai/api/coding/paas/v4"),
+			openaiextended.WithAPIKey(os.Getenv("CRUSH_ZAI_API_KEY")),
+			openaiextended.WithHTTPClient(&http.Client{Transport: r}),
 		)
 		if err != nil {
 			return nil, err
