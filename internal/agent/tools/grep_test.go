@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -85,7 +87,9 @@ func TestGrepWithIgnoreFiles(t *testing.T) {
 
 	// Test both implementations
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
-		"regex": searchFilesWithRegex,
+		"regex": func(pattern, path, include string) ([]grepMatch, error) {
+			return searchFilesWithRegex(t.Context(), pattern, path, include)
+		},
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
 			return searchWithRipgrep(t.Context(), pattern, path, include)
 		},
@@ -145,7 +149,9 @@ func TestSearchImplementations(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".crushignore"), []byte("file5.txt\n"), 0o644))
 
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
-		"regex": searchFilesWithRegex,
+		"regex": func(pattern, path, include string) ([]grepMatch, error) {
+			return searchFilesWithRegex(t.Context(), pattern, path, include)
+		},
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
 			return searchWithRipgrep(t.Context(), pattern, path, include)
 		},
@@ -396,7 +402,9 @@ func TestColumnMatch(t *testing.T) {
 
 	// Test both implementations
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
-		"regex": searchFilesWithRegex,
+		"regex": func(pattern, path, include string) ([]grepMatch, error) {
+			return searchFilesWithRegex(t.Context(), pattern, path, include)
+		},
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
 			return searchWithRipgrep(t.Context(), pattern, path, include)
 		},
@@ -418,4 +426,25 @@ func TestColumnMatch(t *testing.T) {
 			require.Equal(t, "testdata/grep.txt", filepath.ToSlash(filepath.Clean(match.path)))
 		})
 	}
+}
+
+func TestSearchFilesWithRegex_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	// Create some files to search.
+	for i := range 10 {
+		path := filepath.Join(tempDir, fmt.Sprintf("file%d.txt", i))
+		require.NoError(t, os.WriteFile(path, []byte("hello world"), 0o644))
+	}
+
+	// Create a cancelled context.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Search should return context error.
+	_, err := searchFilesWithRegex(ctx, "hello", tempDir, "")
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 }

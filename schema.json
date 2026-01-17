@@ -1,3 +1,6 @@
+Notice: Behaving like ASDF_GOLANG_MOD_VERSION_ENABLED=true
+        In the future this will have to be set to continue
+        reading from the go.mod and go.work files
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/charmbracelet/crush/internal/config/config",
@@ -62,16 +65,6 @@
           },
           "type": "object",
           "description": "Model configurations for different model types"
-        },
-        "recent_models": {
-          "additionalProperties": {
-            "items": {
-              "$ref": "#/$defs/SelectedModel"
-            },
-            "type": "array"
-          },
-          "type": "object",
-          "description": "Recently used models sorted by most recent first"
         },
         "providers": {
           "additionalProperties": {
@@ -445,6 +438,11 @@
             "CLAUDE.md",
             "docs/LLMs.md"
           ]
+        },
+        "worktree_mode": {
+          "type": "boolean",
+          "description": "Enable git worktree mode. Each new session creates a git worktree in .crush-trees directory",
+          "default": false
         }
       },
       "additionalProperties": false,
