@@ -110,7 +110,11 @@ Body`,
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			s, err := ParseContent(tt.content, "/test/path.md")
+			// Use filepath.Join for cross-platform path compatibility.
+			testPath := filepath.Join("test", "path.md")
+			expectedDir := filepath.Join("test")
+
+			s, err := ParseContent(tt.content, testPath)
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.errContains != "" {
@@ -121,8 +125,8 @@ Body`,
 
 			require.NoError(t, err)
 			require.NotNil(t, s)
-			require.Equal(t, "/test/path.md", s.FilePath)
-			require.Equal(t, "/test", s.Path)
+			require.Equal(t, testPath, s.FilePath)
+			require.Equal(t, expectedDir, s.Path)
 
 			if tt.check != nil {
 				tt.check(t, s)
