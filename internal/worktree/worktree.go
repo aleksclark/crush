@@ -235,8 +235,12 @@ func SanitizeName(name string) string {
 	name = strings.Trim(name, "-")
 
 	// Ensure it starts with alphanumeric.
-	if len(name) > 0 && !((name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= '0' && name[0] <= '9')) {
-		name = "session-" + name
+	if len(name) > 0 {
+		c := name[0]
+		isAlphanumeric := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if !isAlphanumeric {
+			name = "session-" + name
+		}
 	}
 
 	// Truncate if too long.

@@ -19,7 +19,7 @@ func setupTestDB(t *testing.T) *db.Queries {
 	t.Cleanup(func() { database.Close() })
 
 	// Create all required tables (simplified schema for testing).
-	_, err = database.Exec(`
+	_, err = database.ExecContext(context.Background(), `
 		CREATE TABLE sessions (
 			id TEXT PRIMARY KEY,
 			parent_session_id TEXT,

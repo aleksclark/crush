@@ -175,19 +175,20 @@ func TestIsValidName(t *testing.T) {
 // setupGitRepo creates a temporary git repository for testing.
 func setupGitRepo(t *testing.T) string {
 	t.Helper()
+	ctx := context.Background()
 	dir := t.TempDir()
 
 	// Initialize git repo.
-	cmd := exec.Command("git", "init")
+	cmd := exec.CommandContext(ctx, "git", "init")
 	cmd.Dir = dir
 	require.NoError(t, cmd.Run())
 
 	// Configure git user for commits.
-	cmd = exec.Command("git", "config", "user.email", "test@example.com")
+	cmd = exec.CommandContext(ctx, "git", "config", "user.email", "test@example.com")
 	cmd.Dir = dir
 	require.NoError(t, cmd.Run())
 
-	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd = exec.CommandContext(ctx, "git", "config", "user.name", "Test User")
 	cmd.Dir = dir
 	require.NoError(t, cmd.Run())
 
@@ -195,11 +196,11 @@ func setupGitRepo(t *testing.T) string {
 	readme := filepath.Join(dir, "README.md")
 	require.NoError(t, os.WriteFile(readme, []byte("# Test\n"), 0o644))
 
-	cmd = exec.Command("git", "add", ".")
+	cmd = exec.CommandContext(ctx, "git", "add", ".")
 	cmd.Dir = dir
 	require.NoError(t, cmd.Run())
 
-	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd = exec.CommandContext(ctx, "git", "commit", "-m", "Initial commit")
 	cmd.Dir = dir
 	require.NoError(t, cmd.Run())
 

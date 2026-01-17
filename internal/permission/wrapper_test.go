@@ -17,6 +17,7 @@ func TestPermissionWrapper_ModeBypassPermissions(t *testing.T) {
 	tests := []string{"bash", "edit", "write", "view", "glob"}
 	for _, tool := range tests {
 		t.Run(tool, func(t *testing.T) {
+			t.Parallel()
 			granted, err := wrapped.Request(context.Background(), CreatePermissionRequest{
 				ToolName: tool,
 			})
@@ -39,6 +40,7 @@ func TestPermissionWrapper_ModeYolo(t *testing.T) {
 	tests := []string{"bash", "edit", "write", "view", "glob"}
 	for _, tool := range tests {
 		t.Run(tool, func(t *testing.T) {
+			t.Parallel()
 			granted, err := wrapped.Request(context.Background(), CreatePermissionRequest{
 				ToolName: tool,
 			})
@@ -61,6 +63,7 @@ func TestPermissionWrapper_ModeDontAsk(t *testing.T) {
 	tests := []string{"bash", "edit", "write", "view", "glob"}
 	for _, tool := range tests {
 		t.Run(tool, func(t *testing.T) {
+			t.Parallel()
 			granted, err := wrapped.Request(context.Background(), CreatePermissionRequest{
 				ToolName: tool,
 			})
@@ -80,6 +83,7 @@ func TestPermissionWrapper_ModePlan(t *testing.T) {
 	readOnlyTests := []string{"glob", "grep", "ls", "view", "sourcegraph", "fetch", "lsp_diagnostics", "lsp_references"}
 	for _, tool := range readOnlyTests {
 		t.Run("allowed_"+tool, func(t *testing.T) {
+			t.Parallel()
 			granted, err := wrapped.Request(context.Background(), CreatePermissionRequest{
 				ToolName: tool,
 			})
@@ -92,6 +96,7 @@ func TestPermissionWrapper_ModePlan(t *testing.T) {
 	writeTests := []string{"bash", "edit", "write", "multiedit"}
 	for _, tool := range writeTests {
 		t.Run("denied_"+tool, func(t *testing.T) {
+			t.Parallel()
 			granted, err := wrapped.Request(context.Background(), CreatePermissionRequest{
 				ToolName: tool,
 			})
@@ -112,6 +117,7 @@ func TestPermissionWrapper_ModeAcceptEdits(t *testing.T) {
 	editTests := []string{"edit", "multiedit", "write"}
 	for _, tool := range editTests {
 		t.Run("auto_approved_"+tool, func(t *testing.T) {
+			t.Parallel()
 			granted, err := wrapped.Request(context.Background(), CreatePermissionRequest{
 				ToolName: tool,
 			})
@@ -122,6 +128,7 @@ func TestPermissionWrapper_ModeAcceptEdits(t *testing.T) {
 
 	// Bash should bubble to underlying (which has skip=true, so it approves).
 	t.Run("bubbles_bash", func(t *testing.T) {
+		t.Parallel()
 		granted, err := wrapped.Request(context.Background(), CreatePermissionRequest{
 			ToolName: "bash",
 		})
@@ -145,6 +152,8 @@ func TestPermissionWrapper_ModeDefault(t *testing.T) {
 }
 
 func TestDescribeEffectivePermissions(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		mode     PermissionMode
 		contains string
@@ -160,6 +169,7 @@ func TestDescribeEffectivePermissions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.mode), func(t *testing.T) {
+			t.Parallel()
 			desc := DescribeEffectivePermissions(tt.mode)
 			require.Contains(t, desc, tt.contains)
 		})
@@ -181,6 +191,7 @@ func TestPermissionMode_IsValid(t *testing.T) {
 
 	for _, mode := range validModes {
 		t.Run("valid_"+string(mode), func(t *testing.T) {
+			t.Parallel()
 			require.True(t, mode.IsValid())
 		})
 	}
@@ -193,6 +204,7 @@ func TestPermissionMode_IsValid(t *testing.T) {
 
 	for _, mode := range invalidModes {
 		t.Run("invalid_"+string(mode), func(t *testing.T) {
+			t.Parallel()
 			require.False(t, mode.IsValid())
 		})
 	}
@@ -216,6 +228,7 @@ func TestPermissionMode_Normalize(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.input), func(t *testing.T) {
+			t.Parallel()
 			require.Equal(t, tt.expected, tt.input.Normalize())
 		})
 	}
