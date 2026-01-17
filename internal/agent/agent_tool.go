@@ -145,7 +145,7 @@ func (c *coordinator) buildAgentToolDescription() string {
 	sb.WriteString("\n\n<available_subagents>\n")
 	sb.WriteString("You can specify a subagent by name using the 'subagent' parameter:\n")
 	for _, s := range subagents {
-		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", s.Name, s.Description))
+		fmt.Fprintf(&sb, "- **%s**: %s\n", s.Name, s.Description)
 	}
 	sb.WriteString("</available_subagents>\n")
 

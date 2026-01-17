@@ -3,6 +3,7 @@ package agents
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -10,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/subagent"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
@@ -20,6 +22,9 @@ import (
 
 // AgentsDialogID is the unique identifier for the agents dialog.
 const AgentsDialogID dialogs.DialogID = "agents"
+
+// promptPreviewMaxLen is the maximum length of the system prompt preview.
+const promptPreviewMaxLen = 200
 
 // AgentsDialog interface for the agents list dialog.
 type AgentsDialog interface {
@@ -188,28 +193,38 @@ func (a *agentsDialogCmp) renderDetailView() string {
 		lines = append(lines, "")
 	}
 
-	// Model.
-	if agent.Model != "" {
-		lines = append(lines, fmt.Sprintf("Model: %s", agent.Model))
+	// Model with human-readable description.
+	modelDesc := describeModel(agent.Model)
+	lines = append(lines, fmt.Sprintf("Model: %s", modelDesc))
+
+	// Permission mode with effective permissions description.
+	permMode := agent.PermissionMode
+	if permMode == "" {
+		permMode = subagent.PermissionDefault
+	}
+	permDesc := permission.DescribeEffectivePermissions(permission.PermissionMode(permMode))
+	lines = append(lines, fmt.Sprintf("Permissions: %s (%s)", permMode, permDesc))
+
+	// Effective tools (computed from allowed/disallowed).
+	effectiveTools := computeEffectiveTools(agent)
+	if len(effectiveTools) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, fmt.Sprintf("Effective Tools (%d):", len(effectiveTools)))
+		// Group tools by category for readability.
+		lines = append(lines, fmt.Sprintf("  %s", strings.Join(effectiveTools, ", ")))
+	} else {
+		lines = append(lines, "")
+		lines = append(lines, "Effective Tools: All tools (inherits from parent)")
 	}
 
-	// Permission mode.
-	if agent.PermissionMode != "" {
-		lines = append(lines, fmt.Sprintf("Permission Mode: %s", agent.PermissionMode))
-	}
-
-	// Tools.
-	if len(agent.Tools) > 0 {
-		lines = append(lines, fmt.Sprintf("Allowed Tools: %s", strings.Join(agent.Tools, ", ")))
-	}
-
-	// Disallowed tools.
+	// Show disallowed tools if any.
 	if len(agent.DisallowedTools) > 0 {
-		lines = append(lines, fmt.Sprintf("Disallowed Tools: %s", strings.Join(agent.DisallowedTools, ", ")))
+		lines = append(lines, fmt.Sprintf("Disallowed: %s", strings.Join(agent.DisallowedTools, ", ")))
 	}
 
 	// Skills.
 	if len(agent.Skills) > 0 {
+		lines = append(lines, "")
 		lines = append(lines, fmt.Sprintf("Skills: %s", strings.Join(agent.Skills, ", ")))
 	}
 
@@ -224,8 +239,8 @@ func (a *agentsDialogCmp) renderDetailView() string {
 	if agent.SystemPrompt != "" {
 		lines = append(lines, "")
 		promptPreview := agent.SystemPrompt
-		if len(promptPreview) > 200 {
-			promptPreview = promptPreview[:200] + "..."
+		if len(promptPreview) > promptPreviewMaxLen {
+			promptPreview = promptPreview[:promptPreviewMaxLen] + "..."
 		}
 		// Remove newlines for preview.
 		promptPreview = strings.ReplaceAll(promptPreview, "\n", " ")
@@ -238,6 +253,40 @@ func (a *agentsDialogCmp) renderDetailView() string {
 		Padding(1)
 
 	return style.Render(strings.Join(lines, "\n"))
+}
+
+// describeModel returns a human-readable description of the model type.
+func describeModel(model subagent.ModelType) string {
+	switch model {
+	case subagent.ModelSonnet:
+		return "sonnet (large, balanced)"
+	case subagent.ModelOpus:
+		return "opus (large, most capable)"
+	case subagent.ModelHaiku:
+		return "haiku (small, fast)"
+	case subagent.ModelInherit, "":
+		return "inherit (uses parent model)"
+	default:
+		return string(model)
+	}
+}
+
+// computeEffectiveTools returns the list of tools the agent will actually have.
+// If Tools is empty, returns nil to indicate "all tools" (inherits from parent).
+// Otherwise, returns Tools minus DisallowedTools.
+func computeEffectiveTools(agent *subagent.Subagent) []string {
+	if len(agent.Tools) == 0 {
+		return nil
+	}
+
+	// Filter out disallowed tools.
+	var effective []string
+	for _, tool := range agent.Tools {
+		if !slices.Contains(agent.DisallowedTools, tool) {
+			effective = append(effective, tool)
+		}
+	}
+	return effective
 }
 
 func (a *agentsDialogCmp) Cursor() *tea.Cursor {

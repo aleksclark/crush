@@ -247,6 +247,15 @@ func TestSubagentValidate(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "valid with yolo permission mode",
+			subagent: Subagent{
+				Name:           "test",
+				Description:    "Test",
+				PermissionMode: PermissionYolo,
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {

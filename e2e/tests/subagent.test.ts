@@ -555,9 +555,9 @@ test.describe("Agents dialog", () => {
     // Press ctrl+a to open agents dialog
     terminal.write("\x01"); // ctrl+a = ASCII 1
 
-    // Should show the agents dialog title with count
+    // Should show the agents dialog title with count (8 agents in e2e/.crush/agents/)
     await expect(
-      terminal.getByText("Agents (3)", { full: true })
+      terminal.getByText("Agents (8)", { full: true })
     ).toBeVisible();
   });
 

@@ -348,6 +348,12 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		return nil, err
 	}
 
+	// Wrap permissions with agent's permission mode if specified.
+	agentPermissions := permission.WrapWithMode(
+		c.permissions,
+		permission.PermissionMode(agent.PermissionMode),
+	)
+
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
 		large,
@@ -356,7 +362,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		"",
 		isSubAgent,
 		c.cfg.Options.DisableAutoSummarize,
-		c.permissions.SkipRequests(),
+		agentPermissions.SkipRequests(),
 		c.sessions,
 		c.messages,
 		nil,
@@ -372,7 +378,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	c.readyWg.Go(func() error {
-		tools, err := c.buildTools(ctx, agent)
+		tools, err := c.buildTools(ctx, agent, agentPermissions)
 		if err != nil {
 			return err
 		}
@@ -383,7 +389,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	return result, nil
 }
 
-func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fantasy.AgentTool, error) {
+func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, permissions permission.Service) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
 	if slices.Contains(agent.AllowedTools, AgentToolName) {
 		agentTool, err := c.agentTool(ctx)
@@ -410,20 +416,20 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	}
 
 	allTools = append(allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
+		tools.NewBashTool(permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
-		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewEditTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
-		tools.NewMultiEditTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
-		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
+		tools.NewDownloadTool(permissions, c.cfg.WorkingDir(), nil),
+		tools.NewEditTool(c.lspClients, permissions, c.history, c.cfg.WorkingDir()),
+		tools.NewMultiEditTool(c.lspClients, permissions, c.history, c.cfg.WorkingDir()),
+		tools.NewFetchTool(permissions, c.cfg.WorkingDir(), nil),
 		tools.NewGlobTool(c.cfg.WorkingDir()),
 		tools.NewGrepTool(c.cfg.WorkingDir()),
-		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Tools.Ls),
+		tools.NewLsTool(permissions, c.cfg.WorkingDir(), c.cfg.Tools.Ls),
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),
-		tools.NewViewTool(c.lspClients, c.permissions, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
-		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
+		tools.NewViewTool(c.lspClients, permissions, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
+		tools.NewWriteTool(c.lspClients, permissions, c.history, c.cfg.WorkingDir()),
 	)
 
 	if len(c.cfg.LSP) > 0 {
@@ -442,7 +448,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 	}
 
-	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg.WorkingDir()) {
+	for _, tool := range tools.GetMCPTools(permissions, c.cfg.WorkingDir()) {
 		slog.Debug("considering MCP tool", "tool", tool.Name(), "allowedMCP", agent.AllowedMCP)
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
@@ -846,7 +852,8 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 		return errors.New("coder agent not configured")
 	}
 
-	tools, err := c.buildTools(ctx, agentCfg)
+	// Main agent uses default permissions (no mode wrapper).
+	tools, err := c.buildTools(ctx, agentCfg, c.permissions)
 	if err != nil {
 		return err
 	}

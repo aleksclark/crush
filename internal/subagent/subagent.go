@@ -28,7 +28,7 @@ type Subagent struct {
 	Path     string    `yaml:"-" json:"path,omitempty"`      // Directory containing the agent file.
 	FilePath string    `yaml:"-" json:"file_path,omitempty"` // Full path to the agent file.
 	Priority int       `yaml:"-" json:"priority,omitempty"`  // Resolution priority (higher = more priority).
-	ModTime  time.Time `yaml:"-" json:"mod_time,omitempty"`  // Last modification time for change detection.
+	ModTime  time.Time `yaml:"-" json:"mod_time,omitzero"`   // Last modification time for change detection.
 }
 
 // Hooks defines lifecycle hooks for subagent execution.
@@ -49,6 +49,8 @@ const (
 	PermissionDontAsk PermissionMode = "dontAsk"
 	// PermissionBypassPermissions skips all permission checks.
 	PermissionBypassPermissions PermissionMode = "bypassPermissions"
+	// PermissionYolo is an alias for bypassPermissions (skips all permission checks).
+	PermissionYolo PermissionMode = "yolo"
 	// PermissionPlan enables read-only exploration mode.
 	PermissionPlan PermissionMode = "plan"
 )
@@ -56,11 +58,20 @@ const (
 // IsValid returns true if the permission mode is a known value.
 func (p PermissionMode) IsValid() bool {
 	switch p {
-	case "", PermissionDefault, PermissionAcceptEdits, PermissionDontAsk, PermissionBypassPermissions, PermissionPlan:
+	case "", PermissionDefault, PermissionAcceptEdits, PermissionDontAsk, PermissionBypassPermissions, PermissionYolo, PermissionPlan:
 		return true
 	default:
 		return false
 	}
+}
+
+// Normalize returns the canonical form of the permission mode.
+// This converts aliases (like "yolo") to their canonical form ("bypassPermissions").
+func (p PermissionMode) Normalize() PermissionMode {
+	if p == PermissionYolo {
+		return PermissionBypassPermissions
+	}
+	return p
 }
 
 // ModelType specifies which model the subagent should use.
