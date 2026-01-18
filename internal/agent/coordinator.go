@@ -417,7 +417,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, permis
 	}
 
 	allTools = append(allTools,
-		tools.NewBashTool(permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
+		tools.NewBashTool(permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName, c.cfg.Options.AllowUnsafeCommands),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDeleteTool(c.lspClients, permissions, c.history, c.cfg.WorkingDir()),

@@ -409,6 +409,17 @@ Notice: Behaving like ASDF_GOLANG_MOD_VERSION_ENABLED=true
           "type": "array",
           "description": "List of built-in tools to disable and hide from the agent"
         },
+        "allow_unsafe_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "curl",
+              "wget"
+            ]
+          },
+          "type": "array",
+          "description": "List of normally-blocked bash commands to allow (e.g. curl or wget). Use with caution as these commands are blocked for security reasons"
+        },
         "disable_provider_auto_update": {
           "type": "boolean",
           "description": "Disable providers auto-update",
