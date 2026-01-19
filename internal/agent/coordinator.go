@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/agentstatus"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/history"
@@ -45,6 +46,9 @@ import (
 	"github.com/qjebbs/go-jsons"
 )
 
+// StatusReporter is the interface for agent status reporting.
+type StatusReporter = agentstatus.Reporter
+
 type Coordinator interface {
 	// INFO: (kujtim) this is not used yet we will use this when we have multiple agents
 	// SetMainAgent(string)
@@ -60,6 +64,9 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+
+	// Status reporting.
+	SetStatusReporter(reporter *StatusReporter)
 
 	// Subagent methods.
 	SetSubagentRegistry(registry *subagent.Registry)
@@ -78,6 +85,9 @@ type coordinator struct {
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+
+	// Status reporter for agent status reporting.
+	statusReporter *StatusReporter
 
 	// Subagent registry for dynamic subagent management.
 	subagentRegistry *subagent.Registry
@@ -136,6 +146,18 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
 		maxTokens = model.ModelCfg.MaxTokens
+	}
+
+	// Update status reporter.
+	if c.statusReporter != nil {
+		c.statusReporter.SetModel(model.ModelCfg.Model, model.ModelCfg.Provider)
+		c.statusReporter.SetStatus(agentstatus.StatusThinking)
+		// Truncate task to first 100 chars.
+		task := prompt
+		if len(task) > 100 {
+			task = task[:100] + "..."
+		}
+		c.statusReporter.SetTask(task)
 	}
 
 	if !model.CatwalkCfg.SupportsImages && attachments != nil {
@@ -207,6 +229,15 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		}
 		slog.Info("Retrying request after summarization", "session", sessionID)
 		return run()
+	}
+
+	// Update status reporter on completion.
+	if c.statusReporter != nil {
+		if originalErr != nil {
+			c.statusReporter.SetError(originalErr.Error())
+		} else {
+			c.statusReporter.SetStatus(agentstatus.StatusIdle)
+		}
 	}
 
 	return result, originalErr
@@ -964,6 +995,15 @@ func (c *coordinator) SetSubagentRegistry(registry *subagent.Registry) {
 
 	c.subagentRegistry = registry
 	c.subagentCache = csync.NewMap[string, SessionAgent]()
+}
+
+// SetStatusReporter sets the status reporter for agent status reporting.
+func (c *coordinator) SetStatusReporter(reporter *StatusReporter) {
+	c.statusReporter = reporter
+	// Propagate to current agent.
+	if c.currentAgent != nil {
+		c.currentAgent.SetStatusReporter(reporter)
+	}
 }
 
 // GetSubagent returns a subagent by name from the registry.

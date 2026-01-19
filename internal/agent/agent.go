@@ -78,6 +78,7 @@ type SessionAgent interface {
 	SetModels(large Model, small Model)
 	SetTools(tools []fantasy.AgentTool)
 	SetSystemPrompt(systemPrompt string)
+	SetStatusReporter(reporter *StatusReporter)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -109,6 +110,8 @@ type sessionAgent struct {
 	disableAutoSummarize bool
 	isYolo               bool
 	maxSteps             int
+
+	statusReporter *StatusReporter
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -352,6 +355,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			)
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
+			// Report tool start to status reporter.
+			if a.statusReporter != nil {
+				a.statusReporter.ToolStart(tc.ToolName)
+			}
+
 			toolCall := message.ToolCall{
 				ID:               tc.ToolCallID,
 				Name:             tc.ToolName,
@@ -363,6 +371,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
+			// Report tool end to status reporter.
+			if a.statusReporter != nil {
+				a.statusReporter.ToolEnd(result.ToolName)
+			}
+
 			toolResult := a.convertToToolResult(result)
 			_, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
 				Role: message.Tool,
@@ -392,6 +405,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
 			_, sessionErr := a.sessions.Save(genCtx, updatedSession)
 			sessionLock.Unlock()
+
+			// Report token and cost usage to status reporter.
+			if a.statusReporter != nil {
+				usage := stepResult.Usage
+				a.statusReporter.UpdateTokens(
+					usage.InputTokens,
+					usage.OutputTokens,
+					usage.CacheReadTokens,
+					usage.CacheCreationTokens,
+				)
+				a.statusReporter.UpdateCost(updatedSession.Cost)
+			}
+
 			if sessionErr != nil {
 				return sessionErr
 			}
@@ -1106,6 +1132,10 @@ func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 
 func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
 	a.systemPrompt.Set(systemPrompt)
+}
+
+func (a *sessionAgent) SetStatusReporter(reporter *StatusReporter) {
+	a.statusReporter = reporter
 }
 
 func (a *sessionAgent) Model() Model {

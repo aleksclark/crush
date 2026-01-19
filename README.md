@@ -738,6 +738,75 @@ Or by setting the following in your config:
 Crush also respects the [`DO_NOT_TRACK`](https://consoledonottrack.com)
 convention which can be enabled via `export DO_NOT_TRACK=1`.
 
+## Agent Status Reporting
+
+Crush supports the [Agent Status Reporting Standard](https://github.com/your-repo/agent-status-reporting),
+a filesystem-based approach for reporting agent activity. When enabled, Crush
+writes JSON status files to a shared directory that external monitors can read
+to display real-time agent activity.
+
+### Enabling status reporting
+
+To enable agent status reporting, set `agent_status_dir` in your config:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "agent_status_dir": "~/.agent-status"
+  }
+}
+```
+
+Or set the `AGENT_STATUS_DIR` environment variable:
+
+```bash
+export AGENT_STATUS_DIR=~/.agent-status
+```
+
+### Disabling status reporting
+
+To disable status reporting (even if `AGENT_STATUS_DIR` is set), use:
+
+```bash
+export AGENT_STATUS_DISABLE=1
+```
+
+### Status file format
+
+Status files are written as JSON with the following structure:
+
+```json
+{
+  "v": 1,
+  "agent": "crush",
+  "instance": "a1b2c3",
+  "pid": 12345,
+  "project": "my-project",
+  "cwd": "/home/user/my-project",
+  "status": "working",
+  "task": "implementing feature X",
+  "model": "claude-sonnet-4-20250514",
+  "provider": "anthropic",
+  "tools": {
+    "active": "edit",
+    "recent": ["view", "grep", "edit"],
+    "counts": { "edit": 5, "view": 12 }
+  },
+  "tokens": {
+    "input": 125000,
+    "output": 15000,
+    "cache_read": 80000,
+    "cache_write": 45000
+  },
+  "cost_usd": 0.42,
+  "started": 1737276000,
+  "updated": 1737276300
+}
+```
+
+Status values: `idle`, `thinking`, `working`, `waiting`, `error`, `done`, `paused`
+
 ## Contributing
 
 See the [contributing guide](https://github.com/charmbracelet/crush?tab=contributing-ov-file#contributing).
