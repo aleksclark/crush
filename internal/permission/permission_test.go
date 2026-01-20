@@ -251,3 +251,92 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		assert.True(t, result, "Repeated request should be auto-approved due to persistent permission")
 	})
 }
+
+func TestStatusCallback(t *testing.T) {
+	t.Parallel()
+
+	t.Run("callback is called when waiting for permission", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, []string{})
+
+		var callbackStates []WaitingState
+		var mu sync.Mutex
+		service.SetStatusCallback(func(state WaitingState) {
+			mu.Lock()
+			callbackStates = append(callbackStates, state)
+			mu.Unlock()
+		})
+
+		req := CreatePermissionRequest{
+			SessionID:   "session1",
+			ToolName:    "test_tool",
+			Description: "Test action",
+			Action:      "test",
+			Path:        "/tmp/test",
+		}
+
+		events := service.Subscribe(t.Context())
+		var wg sync.WaitGroup
+
+		wg.Go(func() {
+			_, _ = service.Request(t.Context(), req)
+		})
+
+		// Wait for the event and grant permission.
+		event := <-events
+		service.Grant(event.Payload)
+		wg.Wait()
+
+		mu.Lock()
+		defer mu.Unlock()
+		require.Len(t, callbackStates, 2, "Callback should be called twice (start and end)")
+		assert.Equal(t, WaitingForInput, callbackStates[0], "First call should be WaitingForInput")
+		assert.Equal(t, NotWaitingForInput, callbackStates[1], "Second call should be NotWaitingForInput")
+	})
+
+	t.Run("callback is not called for skipped permissions", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", true, []string{}) // skip=true
+
+		callbackCalled := false
+		service.SetStatusCallback(func(state WaitingState) {
+			callbackCalled = true
+		})
+
+		req := CreatePermissionRequest{
+			SessionID:   "session1",
+			ToolName:    "test_tool",
+			Description: "Test action",
+			Action:      "test",
+			Path:        "/tmp/test",
+		}
+
+		result, err := service.Request(t.Context(), req)
+		require.NoError(t, err)
+		assert.True(t, result)
+		assert.False(t, callbackCalled, "Callback should not be called when permissions are skipped")
+	})
+
+	t.Run("callback is not called for allowed tools", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, []string{"test_tool"})
+
+		callbackCalled := false
+		service.SetStatusCallback(func(state WaitingState) {
+			callbackCalled = true
+		})
+
+		req := CreatePermissionRequest{
+			SessionID:   "session1",
+			ToolName:    "test_tool",
+			Description: "Test action",
+			Action:      "test",
+			Path:        "/tmp/test",
+		}
+
+		result, err := service.Request(t.Context(), req)
+		require.NoError(t, err)
+		assert.True(t, result)
+		assert.False(t, callbackCalled, "Callback should not be called for allowed tools")
+	})
+}

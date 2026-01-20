@@ -65,6 +65,11 @@ type Coordinator interface {
 	Model() Model
 	UpdateModels(ctx context.Context) error
 
+	// Queued model updates for when agent is busy.
+	QueueModelUpdate(modelType config.SelectedModelType, model config.SelectedModel)
+	HasPendingModelUpdate() bool
+	ClearPendingModelUpdate()
+
 	// Status reporting.
 	SetStatusReporter(reporter *StatusReporter)
 
@@ -73,6 +78,13 @@ type Coordinator interface {
 	GetSubagent(name string) (*subagent.Subagent, bool)
 	ListSubagents() []*subagent.Subagent
 	ReloadSubagents() error
+}
+
+// PendingModelUpdate represents a queued model change to be applied when the
+// agent stops being busy.
+type PendingModelUpdate struct {
+	ModelType config.SelectedModelType
+	Model     config.SelectedModel
 }
 
 type coordinator struct {
@@ -95,6 +107,10 @@ type coordinator struct {
 	subagentMu       sync.RWMutex
 
 	readyWg errgroup.Group
+
+	// Pending model update to be applied when agent stops being busy.
+	pendingModelUpdate *PendingModelUpdate
+	pendingModelMu     sync.Mutex
 }
 
 func NewCoordinator(
@@ -237,6 +253,19 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 			c.statusReporter.SetError(originalErr.Error())
 		} else {
 			c.statusReporter.SetStatus(agentstatus.StatusIdle)
+		}
+	}
+
+	// Apply any pending model update now that the agent is no longer busy.
+	if !c.IsBusy() {
+		if applied := c.applyPendingModelUpdate(ctx); applied != nil {
+			modelTypeName := "large"
+			if applied.ModelType == config.SelectedModelTypeSmall {
+				modelTypeName = "small"
+			}
+			slog.Info("Applied pending model update",
+				"type", modelTypeName,
+				"model", applied.Model.Model)
 		}
 	}
 
@@ -1041,6 +1070,59 @@ func (c *coordinator) ReloadSubagents() error {
 	c.subagentCache = csync.NewMap[string, SessionAgent]()
 
 	return c.subagentRegistry.Reload()
+}
+
+// QueueModelUpdate queues a model update to be applied when the agent stops
+// being busy. If the agent is not busy, the update is applied immediately.
+func (c *coordinator) QueueModelUpdate(modelType config.SelectedModelType, model config.SelectedModel) {
+	c.pendingModelMu.Lock()
+	defer c.pendingModelMu.Unlock()
+	c.pendingModelUpdate = &PendingModelUpdate{
+		ModelType: modelType,
+		Model:     model,
+	}
+}
+
+// HasPendingModelUpdate returns true if there is a pending model update queued.
+func (c *coordinator) HasPendingModelUpdate() bool {
+	c.pendingModelMu.Lock()
+	defer c.pendingModelMu.Unlock()
+	return c.pendingModelUpdate != nil
+}
+
+// ClearPendingModelUpdate clears any pending model update.
+func (c *coordinator) ClearPendingModelUpdate() {
+	c.pendingModelMu.Lock()
+	defer c.pendingModelMu.Unlock()
+	c.pendingModelUpdate = nil
+}
+
+// applyPendingModelUpdate applies any pending model update if the agent is no
+// longer busy. Returns the update that was applied, or nil if there was none.
+func (c *coordinator) applyPendingModelUpdate(ctx context.Context) *PendingModelUpdate {
+	c.pendingModelMu.Lock()
+	pending := c.pendingModelUpdate
+	if pending == nil {
+		c.pendingModelMu.Unlock()
+		return nil
+	}
+	c.pendingModelUpdate = nil
+	c.pendingModelMu.Unlock()
+
+	// Apply the config update.
+	cfg := config.Get()
+	if err := cfg.UpdatePreferredModel(pending.ModelType, pending.Model); err != nil {
+		slog.Error("Failed to apply pending model update", "error", err)
+		return nil
+	}
+
+	// Rebuild the agent models.
+	if err := c.UpdateModels(ctx); err != nil {
+		slog.Error("Failed to update models after pending model update", "error", err)
+		return nil
+	}
+
+	return pending
 }
 
 // getOrBuildSubagentSession returns a cached subagent session or builds a new one.

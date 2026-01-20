@@ -15,6 +15,18 @@ import (
 
 var ErrorPermissionDenied = errors.New("user denied permission")
 
+// WaitingState indicates whether the permission service is waiting for user input.
+type WaitingState bool
+
+const (
+	WaitingForInput    WaitingState = true
+	NotWaitingForInput WaitingState = false
+)
+
+// StatusCallback is called when the permission service waiting state changes.
+// It receives true when starting to wait for user input, false when done waiting.
+type StatusCallback func(waiting WaitingState)
+
 type CreatePermissionRequest struct {
 	SessionID   string `json:"session_id"`
 	ToolCallID  string `json:"tool_call_id"`
@@ -52,6 +64,7 @@ type Service interface {
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
+	SetStatusCallback(callback StatusCallback)
 }
 
 type permissionService struct {
@@ -71,6 +84,10 @@ type permissionService struct {
 	requestMu       sync.Mutex
 	activeRequest   *PermissionRequest
 	activeRequestMu sync.Mutex
+
+	// statusCallback is called when waiting state changes.
+	statusCallback   StatusCallback
+	statusCallbackMu sync.RWMutex
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
@@ -208,6 +225,15 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	// Publish the request
 	s.Publish(pubsub.CreatedEvent, permission)
 
+	// Notify that we're waiting for user input.
+	s.statusCallbackMu.RLock()
+	callback := s.statusCallback
+	s.statusCallbackMu.RUnlock()
+	if callback != nil {
+		callback(WaitingForInput)
+		defer callback(NotWaitingForInput)
+	}
+
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
@@ -232,6 +258,12 @@ func (s *permissionService) SetSkipRequests(skip bool) {
 
 func (s *permissionService) SkipRequests() bool {
 	return s.skip
+}
+
+func (s *permissionService) SetStatusCallback(callback StatusCallback) {
+	s.statusCallbackMu.Lock()
+	defer s.statusCallbackMu.Unlock()
+	s.statusCallback = callback
 }
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {

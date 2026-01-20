@@ -146,6 +146,11 @@ func (w *PermissionWrapper) SubscribeNotifications(ctx context.Context) <-chan p
 	return w.underlying.SubscribeNotifications(ctx)
 }
 
+// SetStatusCallback implements Service.
+func (w *PermissionWrapper) SetStatusCallback(callback StatusCallback) {
+	w.underlying.SetStatusCallback(callback)
+}
+
 // DescribeEffectivePermissions returns a human-readable description of what
 // permissions will be granted for the given mode.
 func DescribeEffectivePermissions(mode PermissionMode) string {

@@ -17,10 +17,10 @@ import (
 type Status string
 
 const (
-	StatusIdle     Status = "idle"     // Waiting for user input.
+	StatusIdle     Status = "idle"     // Ready and awaiting user prompt.
 	StatusThinking Status = "thinking" // Processing/reasoning (no tool calls yet).
 	StatusWorking  Status = "working"  // Actively executing tools.
-	StatusWaiting  Status = "waiting"  // Waiting for external resource.
+	StatusWaiting  Status = "waiting"  // Waiting for external resource or user confirmation.
 	StatusError    Status = "error"    // Agent encountered an error.
 	StatusDone     Status = "done"     // Agent completed its task.
 	StatusPaused   Status = "paused"   // Agent is paused by user.
@@ -69,7 +69,16 @@ type Reporter struct {
 	filePath string
 	status   AgentStatus
 	closed   bool
+
+	// Periodic update ticker and stop channel.
+	ticker   *time.Ticker
+	stopChan chan struct{}
 }
+
+const (
+	// heartbeatInterval is how often to write the status file even if nothing changed.
+	heartbeatInterval = 10 * time.Second
+)
 
 // NewReporter creates a new status reporter. If dir is empty, status reporting
 // is disabled. The dir can use $AGENT_STATUS_DIR or default to ~/.agent-status.
@@ -117,12 +126,17 @@ func NewReporter(dir string) (*Reporter, error) {
 			},
 			Tokens: &Tokens{},
 		},
+		ticker:   time.NewTicker(heartbeatInterval),
+		stopChan: make(chan struct{}),
 	}
 
 	// Write initial status.
 	if err := r.write(); err != nil {
 		return nil, err
 	}
+
+	// Start heartbeat goroutine to update status periodically.
+	go r.heartbeat()
 
 	return r, nil
 }
@@ -243,12 +257,43 @@ func (r *Reporter) UpdateCost(cost float64) {
 // Close removes the status file and marks the reporter as closed.
 func (r *Reporter) Close() error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.closed {
+		r.mu.Unlock()
 		return nil
 	}
 	r.closed = true
-	return os.Remove(r.filePath)
+
+	// Stop the heartbeat goroutine.
+	if r.ticker != nil {
+		r.ticker.Stop()
+	}
+	if r.stopChan != nil {
+		close(r.stopChan)
+	}
+
+	filePath := r.filePath
+	r.mu.Unlock()
+
+	return os.Remove(filePath)
+}
+
+// heartbeat periodically writes the status file to keep the updated timestamp
+// current, even if no status changes occur.
+func (r *Reporter) heartbeat() {
+	for {
+		select {
+		case <-r.stopChan:
+			return
+		case <-r.ticker.C:
+			r.mu.Lock()
+			if r.closed {
+				r.mu.Unlock()
+				return
+			}
+			r.write()
+			r.mu.Unlock()
+		}
+	}
 }
 
 // write atomically writes the status to the file.

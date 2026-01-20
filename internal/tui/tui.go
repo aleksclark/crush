@@ -307,8 +307,15 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.handleWindowResize(a.wWidth, a.wHeight)
 	// Model Switch
 	case models.ModelSelectedMsg:
+		modelTypeName := "large"
+		if msg.ModelType == config.SelectedModelTypeSmall {
+			modelTypeName = "small"
+		}
+
 		if a.app.AgentCoordinator.IsBusy() {
-			return a, util.ReportWarn("Agent is busy, please wait...")
+			// Queue the model change to be applied when the agent stops being busy.
+			a.app.AgentCoordinator.QueueModelUpdate(msg.ModelType, msg.Model)
+			return a, util.ReportInfo(fmt.Sprintf("%s model will change to %s when agent finishes", modelTypeName, msg.Model.Model))
 		}
 
 		cfg := config.Get()
@@ -318,10 +325,6 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		go a.app.UpdateAgentModel(context.TODO())
 
-		modelTypeName := "large"
-		if msg.ModelType == config.SelectedModelTypeSmall {
-			modelTypeName = "small"
-		}
 		return a, util.ReportInfo(fmt.Sprintf("%s model changed to %s", modelTypeName, msg.Model.Model))
 
 	// File Picker

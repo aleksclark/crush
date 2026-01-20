@@ -502,6 +502,15 @@ func (app *App) initStatusReporter(cfg *config.Config) error {
 	projectName := filepath.Base(cfg.WorkingDir())
 	reporter.SetProject(projectName, cfg.WorkingDir())
 
+	// Set up the permission service to report waiting status.
+	app.Permissions.SetStatusCallback(func(waiting permission.WaitingState) {
+		if waiting == permission.WaitingForInput {
+			reporter.SetStatus(agentstatus.StatusWaiting)
+		} else {
+			reporter.SetStatus(agentstatus.StatusWorking)
+		}
+	})
+
 	// Add cleanup on exit.
 	app.cleanupFuncs = append(app.cleanupFuncs, func() error {
 		slog.Debug("Closing agent status reporter")

@@ -41,6 +41,8 @@ func (m *mockPermissionService) SubscribeNotifications(ctx context.Context) <-ch
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }
 
+func (m *mockPermissionService) SetStatusCallback(callback permission.StatusCallback) {}
+
 type mockHistoryService struct {
 	*pubsub.Broker[history.File]
 }
