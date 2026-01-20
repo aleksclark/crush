@@ -510,7 +510,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, permis
 		return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 	}
 
-	for _, tool := range tools.GetMCPTools(permissions, c.cfg.WorkingDir()) {
+	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg.WorkingDir()) {
 		slog.Debug("considering MCP tool", "tool", tool.Name(), "allowedMCP", agent.AllowedMCP)
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions

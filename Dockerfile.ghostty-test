@@ -1,0 +1,47 @@
+FROM ubuntu:22.04
+
+# Install X11, clipboard utilities, dependencies
+RUN apt-get update && apt-get install -y \
+    xvfb \
+    x11-utils \
+    xsel \
+    xclip \
+    wget \
+    git \
+    build-essential \
+    libgtk-4-dev \
+    libadwaita-1-dev \
+    pkg-config \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Go
+RUN wget https://go.dev/dl/go1.23.4.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go1.23.4.linux-amd64.tar.gz && \
+    rm go1.23.4.linux-amd64.tar.gz
+
+# Install Zig (for Ghostty build)
+RUN wget https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz && \
+    tar -C /usr/local -xf zig-linux-x86_64-0.13.0.tar.xz && \
+    rm zig-linux-x86_64-0.13.0.tar.xz
+
+ENV PATH="/usr/local/go/bin:/usr/local/zig-linux-x86_64-0.13.0:${PATH}"
+ENV DISPLAY=:99
+
+WORKDIR /app
+
+# Clone and build Ghostty
+RUN git clone https://github.com/ghostty-org/ghostty.git /tmp/ghostty && \
+    cd /tmp/ghostty && \
+    zig build -Doptimize=ReleaseFast && \
+    cp zig-out/bin/ghostty /usr/local/bin/ && \
+    rm -rf /tmp/ghostty
+
+# Copy source
+COPY . .
+
+# Script to run Crush in Ghostty and test clipboard
+COPY test/integration/clipboard/test-in-ghostty.sh /test-in-ghostty.sh
+RUN chmod +x /test-in-ghostty.sh
+
+CMD /test-in-ghostty.sh

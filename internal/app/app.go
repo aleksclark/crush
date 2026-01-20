@@ -45,6 +45,13 @@ import (
 	"github.com/charmbracelet/x/term"
 )
 
+// UpdateAvailableMsg is sent when a new version is available.
+type UpdateAvailableMsg struct {
+	CurrentVersion string
+	LatestVersion  string
+	IsDevelopment  bool
+}
+
 type App struct {
 	Sessions    session.Service
 	Messages    message.Service
@@ -197,6 +204,15 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 			spinner = nil
 		}
 	}
+
+	// Wait for MCP initialization to complete before reading MCP tools.
+	if err := mcp.WaitForInit(ctx); err != nil {
+		return fmt.Errorf("failed to wait for MCP initialization: %w", err)
+	}
+
+	// force update of agent models before running so mcp tools are loaded
+	app.AgentCoordinator.UpdateModels(ctx)
+
 	defer stopSpinner()
 
 	const maxPromptLengthForTitle = 100
@@ -629,7 +645,7 @@ func (app *App) checkForUpdates(ctx context.Context) {
 	if err != nil || !info.Available() {
 		return
 	}
-	app.events <- pubsub.UpdateAvailableMsg{
+	app.events <- UpdateAvailableMsg{
 		CurrentVersion: info.Current,
 		LatestVersion:  info.Latest,
 		IsDevelopment:  info.IsDevelopment(),
