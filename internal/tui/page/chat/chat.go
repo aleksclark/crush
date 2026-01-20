@@ -13,7 +13,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
@@ -203,6 +202,13 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case tea.KeyboardEnhancementsMsg:
 		p.keyboardEnhancements = msg
 		return p, nil
+	case tea.ClipboardMsg:
+		// Handle clipboard read response (e.g., from middle-click PRIMARY read).
+		// Convert it to a PasteMsg so the editor can handle it.
+		if msg.Content != "" {
+			return p, util.CmdHandler(tea.PasteMsg{Content: msg.Content})
+		}
+		return p, nil
 	case tea.MouseWheelMsg:
 		if p.compact {
 			msg.Y -= 1
@@ -221,17 +227,9 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			msg.Y -= 1
 		}
 		// Handle middle mouse click for X11-style paste.
-		// On X11, middle-click traditionally pastes from PRIMARY selection.
-		// On other platforms, PRIMARY flag is ignored and default clipboard is used.
+		// Request PRIMARY clipboard via OSC 52 - the response will come as ClipboardMsg.
 		if msg.Button == tea.MouseMiddle {
-			return p, func() tea.Msg {
-				// Use PRIMARY selection for X11 middle-click behavior.
-				content, err := clipboard.ReadPrimary()
-				if err != nil || content == "" {
-					return nil
-				}
-				return tea.PasteMsg{Content: content}
-			}
+			return p, util.CmdHandler(tea.ReadPrimaryClipboard())
 		}
 		if p.isMouseOverChat(msg.X, msg.Y) {
 			p.focusedPane = PanelTypeChat

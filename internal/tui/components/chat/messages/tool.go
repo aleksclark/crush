@@ -10,7 +10,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/diff"
@@ -200,10 +199,7 @@ func (m *toolCallCmp) copyTool() tea.Cmd {
 	content := m.formatToolForCopy()
 	return tea.Sequence(
 		tea.SetClipboard(content),
-		func() tea.Msg {
-			_ = clipboard.WriteAll(content)
-			return nil
-		},
+		tea.SetPrimaryClipboard(content),
 		util.ReportInfo("Tool content copied to clipboard"),
 	)
 }

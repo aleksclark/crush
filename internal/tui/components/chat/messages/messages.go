@@ -15,7 +15,6 @@ import (
 	"github.com/charmbracelet/x/exp/ordered"
 	"github.com/google/uuid"
 
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
@@ -107,10 +106,7 @@ func (m *messageCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		if key.Matches(msg, CopyKey) {
 			return m, tea.Sequence(
 				tea.SetClipboard(m.message.Content().Text),
-				func() tea.Msg {
-					_ = clipboard.WriteAll(m.message.Content().Text)
-					return nil
-				},
+				tea.SetPrimaryClipboard(m.message.Content().Text),
 				util.ReportInfo("Message copied to clipboard"),
 			)
 		}

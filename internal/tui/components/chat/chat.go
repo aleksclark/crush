@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -757,14 +756,10 @@ func (m *messageListCmp) CopySelectedText(clear bool) tea.Cmd {
 	}
 
 	cmds := []tea.Cmd{
-		// We use both OSC 52 and native clipboard for compatibility with different
-		// terminal emulators and environments.
+		// Use OSC 52 to set both system clipboard and PRIMARY selection.
+		// This works in terminals that support OSC 52 (like Ghostty).
 		tea.SetClipboard(selectedText),
-		func() tea.Msg {
-			// Copy to both clipboard and PRIMARY selection.
-			_ = clipboard.WriteBoth(selectedText)
-			return nil
-		},
+		tea.SetPrimaryClipboard(selectedText),
 		util.ReportInfo("Selected text copied to clipboard"),
 	}
 	if clear {
