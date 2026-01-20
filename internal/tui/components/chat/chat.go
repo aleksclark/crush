@@ -6,10 +6,10 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -761,12 +761,8 @@ func (m *messageListCmp) CopySelectedText(clear bool) tea.Cmd {
 		// terminal emulators and environments.
 		tea.SetClipboard(selectedText),
 		func() tea.Msg {
-			// Copy to standard clipboard.
-			_ = clipboard.WriteAll(selectedText)
-			// Also copy to PRIMARY selection for X11 middle-click paste.
-			clipboard.Primary = true
-			_ = clipboard.WriteAll(selectedText)
-			clipboard.Primary = false
+			// Copy to both clipboard and PRIMARY selection.
+			_ = clipboard.WriteBoth(selectedText)
 			return nil
 		},
 		util.ReportInfo("Selected text copied to clipboard"),

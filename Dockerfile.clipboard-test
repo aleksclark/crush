@@ -1,0 +1,30 @@
+FROM ubuntu:22.04
+
+# Install X11, clipboard utilities, and Go
+RUN apt-get update && apt-get install -y \
+    xvfb \
+    x11-utils \
+    xsel \
+    xclip \
+    wget \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Go
+RUN wget https://go.dev/dl/go1.23.4.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go1.23.4.linux-amd64.tar.gz && \
+    rm go1.23.4.linux-amd64.tar.gz
+
+ENV PATH="/usr/local/go/bin:${PATH}"
+ENV DISPLAY=:99
+
+WORKDIR /app
+
+# Copy source
+COPY . .
+
+# Start Xvfb and run tests
+CMD Xvfb :99 -screen 0 1024x768x24 & \
+    sleep 2 && \
+    go test -v ./test/integration/clipboard/...

@@ -11,9 +11,9 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
@@ -226,10 +226,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		if msg.Button == tea.MouseMiddle {
 			return p, func() tea.Msg {
 				// Use PRIMARY selection for X11 middle-click behavior.
-				clipboard.Primary = true
-				content, err := clipboard.ReadAll()
-				clipboard.Primary = false
-
+				content, err := clipboard.ReadPrimary()
 				if err != nil || content == "" {
 					return nil
 				}
