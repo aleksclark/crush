@@ -761,7 +761,12 @@ func (m *messageListCmp) CopySelectedText(clear bool) tea.Cmd {
 		// terminal emulators and environments.
 		tea.SetClipboard(selectedText),
 		func() tea.Msg {
+			// Copy to standard clipboard.
 			_ = clipboard.WriteAll(selectedText)
+			// Also copy to PRIMARY selection for X11 middle-click paste.
+			clipboard.Primary = true
+			_ = clipboard.WriteAll(selectedText)
+			clipboard.Primary = false
 			return nil
 		},
 		util.ReportInfo("Selected text copied to clipboard"),

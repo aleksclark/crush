@@ -239,6 +239,38 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
 	case tea.PasteMsg:
+		// First, try to read image data from clipboard using native clipboard API.
+		// This handles Ctrl+V when an image is in the clipboard.
+		imageData, err := readClipboard(clipboardFormatImage)
+		if err == nil && len(imageData) > 0 {
+			// We have image data - create an attachment.
+			mimeBufferSize := min(512, len(imageData))
+			mimeType := http.DetectContentType(imageData[:mimeBufferSize])
+
+			// Only proceed if it's actually an image.
+			if strings.HasPrefix(mimeType, "image/") {
+				// Create a temporary file to store the image.
+				tempFile, err := os.CreateTemp("", "clipboard_image_crush_*")
+				if err == nil {
+					defer tempFile.Close()
+					_, err = tempFile.Write(imageData)
+					if err == nil {
+						fileName := filepath.Base(tempFile.Name())
+						attachment := message.Attachment{
+							FilePath: tempFile.Name(),
+							FileName: fileName,
+							MimeType: mimeType,
+							Content:  imageData,
+						}
+						return m, util.CmdHandler(filepicker.FilePickedMsg{
+							Attachment: attachment,
+						})
+					}
+				}
+			}
+		}
+
+		// No image found, proceed with text paste handling.
 		// If pasted text has more than 2 newlines, treat it as a file attachment.
 		if strings.Count(msg.Content, "\n") > 2 {
 			content := []byte(msg.Content)
@@ -342,84 +374,6 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		if key.Matches(msg, m.keyMap.Newline) {
 			m.textarea.InsertRune('\n')
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
-		}
-		// Handle image paste from clipboard
-		if key.Matches(msg, m.keyMap.PasteImage) {
-			imageData, err := readClipboard(clipboardFormatImage)
-
-			if err != nil || len(imageData) == 0 {
-				// If no image data found, try to get text data (could be file path)
-				var textData []byte
-				textData, err = readClipboard(clipboardFormatText)
-				if err != nil || len(textData) == 0 {
-					// If clipboard is empty, show a warning
-					return m, util.ReportWarn("No data found in clipboard. Note: Some terminals may not support reading image data from clipboard directly.")
-				}
-
-				// Check if the text data is a file path
-				textStr := string(textData)
-				// First, try to interpret as a file path (existing functionality)
-				path := strings.ReplaceAll(textStr, "\\ ", " ")
-				path, err = filepath.Abs(strings.TrimSpace(path))
-				if err == nil {
-					isAllowedType := false
-					for _, ext := range filepicker.AllowedTypes {
-						if strings.HasSuffix(path, ext) {
-							isAllowedType = true
-							break
-						}
-					}
-					if isAllowedType {
-						tooBig, _ := filepicker.IsFileTooBig(path, filepicker.MaxAttachmentSize)
-						if !tooBig {
-							content, err := os.ReadFile(path)
-							if err == nil {
-								mimeBufferSize := min(512, len(content))
-								mimeType := http.DetectContentType(content[:mimeBufferSize])
-								fileName := filepath.Base(path)
-								attachment := message.Attachment{FilePath: path, FileName: fileName, MimeType: mimeType, Content: content}
-								return m, util.CmdHandler(filepicker.FilePickedMsg{
-									Attachment: attachment,
-								})
-							}
-						}
-					}
-				}
-
-				// If not a valid file path, show a warning
-				return m, util.ReportWarn("No image found in clipboard")
-			} else {
-				// We have image data from the clipboard
-				// Create a temporary file to store the clipboard image data
-				tempFile, err := os.CreateTemp("", "clipboard_image_crush_*")
-				if err != nil {
-					return m, util.ReportError(err)
-				}
-				defer tempFile.Close()
-
-				// Write clipboard content to the temporary file
-				_, err = tempFile.Write(imageData)
-				if err != nil {
-					return m, util.ReportError(err)
-				}
-
-				// Determine the file extension based on the image data
-				mimeBufferSize := min(512, len(imageData))
-				mimeType := http.DetectContentType(imageData[:mimeBufferSize])
-
-				// Create an attachment from the temporary file
-				fileName := filepath.Base(tempFile.Name())
-				attachment := message.Attachment{
-					FilePath: tempFile.Name(),
-					FileName: fileName,
-					MimeType: mimeType,
-					Content:  imageData,
-				}
-
-				return m, util.CmdHandler(filepicker.FilePickedMsg{
-					Attachment: attachment,
-				})
-			}
 		}
 		// Handle Enter key
 		if m.textarea.Focused() && key.Matches(msg, m.keyMap.SendMessage) {

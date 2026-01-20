@@ -221,9 +221,15 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			msg.Y -= 1
 		}
 		// Handle middle mouse click for X11-style paste.
+		// On X11, middle-click traditionally pastes from PRIMARY selection.
+		// On other platforms, PRIMARY flag is ignored and default clipboard is used.
 		if msg.Button == tea.MouseMiddle {
 			return p, func() tea.Msg {
+				// Use PRIMARY selection for X11 middle-click behavior.
+				clipboard.Primary = true
 				content, err := clipboard.ReadAll()
+				clipboard.Primary = false
+
 				if err != nil || content == "" {
 					return nil
 				}
