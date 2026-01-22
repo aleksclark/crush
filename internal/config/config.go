@@ -347,12 +347,17 @@ type Agent struct {
 }
 
 type Tools struct {
-	Ls ToolLs `json:"ls,omitzero"`
+	Ls   ToolLs   `json:"ls,omitzero"`
+	Bash ToolBash `json:"bash,omitzero"`
 }
 
 type ToolLs struct {
 	MaxDepth *int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
 	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
+}
+
+type ToolBash struct {
+	AllowUnsafeCommands []string `json:"allow_unsafe_commands,omitempty" jsonschema:"description=List of normally-blocked commands to allow for the bash tool,example=curl,example=wget"`
 }
 
 func (t ToolLs) Limits() (depth, items int) {

@@ -139,8 +139,8 @@ var bannedCommands = []string{
 	"ufw",
 }
 
-func bashDescription(attribution *config.Attribution, modelName string) string {
-	bannedCommandsStr := strings.Join(bannedCommands, ", ")
+func bashDescription(attribution *config.Attribution, modelName string, effectiveBannedCommands []string) string {
+	bannedCommandsStr := strings.Join(effectiveBannedCommands, ", ")
 	var out bytes.Buffer
 	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
 		BannedCommands:  bannedCommandsStr,
@@ -154,9 +154,9 @@ func bashDescription(attribution *config.Attribution, modelName string) string {
 	return out.String()
 }
 
-func blockFuncs() []shell.BlockFunc {
+func blockFuncs(effectiveBannedCommands []string) []shell.BlockFunc {
 	return []shell.BlockFunc{
-		shell.CommandsBlocker(bannedCommands),
+		shell.CommandsBlocker(effectiveBannedCommands),
 
 		// System package managers
 		shell.ArgumentsBlocker("apk", []string{"add"}, nil),
@@ -186,10 +186,11 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string) fantasy.AgentTool {
+func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string, allowUnsafeCommands []string) fantasy.AgentTool {
+	effectiveBannedCommands := filterBannedCommands(bannedCommands, allowUnsafeCommands)
 	return fantasy.NewAgentTool(
 		BashToolName,
-		string(bashDescription(attribution, modelName)),
+		string(bashDescription(attribution, modelName, effectiveBannedCommands)),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Command == "" {
 				return fantasy.NewTextErrorResponse("missing command"), nil
@@ -240,7 +241,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				bgManager := shell.GetBackgroundShellManager()
 				bgManager.Cleanup()
 				// Use background context so it continues after tool returns
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(effectiveBannedCommands), params.Command, params.Description)
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
@@ -295,7 +296,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Start with detached context so it can survive if moved to background
 			bgManager := shell.GetBackgroundShellManager()
 			bgManager.Cleanup()
-			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(effectiveBannedCommands), params.Command, params.Description)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}
@@ -427,6 +428,26 @@ func countLines(s string) int {
 		return 0
 	}
 	return len(strings.Split(s, "\n"))
+}
+
+// filterBannedCommands returns a copy of banned with any commands in allowed removed.
+func filterBannedCommands(banned, allowed []string) []string {
+	if len(allowed) == 0 {
+		return banned
+	}
+
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, cmd := range allowed {
+		allowedSet[cmd] = struct{}{}
+	}
+
+	filtered := make([]string, 0, len(banned))
+	for _, cmd := range banned {
+		if _, isAllowed := allowedSet[cmd]; !isAllowed {
+			filtered = append(filtered, cmd)
+		}
+	}
+	return filtered
 }
 
 func normalizeWorkingDir(path string) string {
