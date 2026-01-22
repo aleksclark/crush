@@ -28,13 +28,13 @@ func GetResources(name string) []*Resource {
 // RefreshResources gets the updated list of resources from the MCP and updates
 // the global state.
 func RefreshResources(ctx context.Context, name string) {
-	session, ok := sessions.Get(name)
+	entry, ok := sessions.Get(name)
 	if !ok {
 		slog.Warn("refresh resources: no session", "name", name)
 		return
 	}
 
-	resources, err := getResources(ctx, session)
+	resources, err := getResources(ctx, entry.session)
 	if err != nil {
 		slog.Error("error listing resources", "error", err, "name", name)
 		return

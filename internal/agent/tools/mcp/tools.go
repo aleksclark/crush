@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/tracing"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -35,13 +36,23 @@ func Tools() iter.Seq2[string, []*Tool] {
 // RunTool runs an MCP tool with the given input parameters.
 func RunTool(ctx context.Context, name, toolName string, input string) (ToolResult, error) {
 	startTime := time.Now()
+
+	// Start tracing span for MCP call.
+	mcpSpan := tracing.StartMCPCall(ctx, name, toolName, GetSessionID())
+	defer mcpSpan.End()
+
+	// Record input in trace.
+	mcpSpan.SetInput(input)
+
 	var args map[string]any
 	if err := json.Unmarshal([]byte(input), &args); err != nil {
+		mcpSpan.SetError(err)
 		return ToolResult{}, fmt.Errorf("error parsing parameters: %s", err)
 	}
 
 	c, err := getOrRenewClient(ctx, name)
 	if err != nil {
+		mcpSpan.SetError(err)
 		logToolInvocation(name, toolName, input, "", err, startTime)
 		return ToolResult{}, err
 	}
@@ -50,11 +61,14 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 		Arguments: args,
 	})
 	if err != nil {
+		mcpSpan.SetError(err)
 		logToolInvocation(name, toolName, input, "", err, startTime)
 		return ToolResult{}, err
 	}
 
 	if len(result.Content) == 0 {
+		mcpSpan.SetOutput("")
+		mcpSpan.SetResult(true, time.Since(startTime).Milliseconds(), "text")
 		logToolInvocation(name, toolName, input, "", nil, startTime)
 		return ToolResult{Type: "text", Content: ""}, nil
 	}
@@ -88,6 +102,8 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 
 	// MCP SDK returns Data as already base64-encoded, so we use it directly.
 	if imageData != nil {
+		mcpSpan.SetOutput(textContent)
+		mcpSpan.SetResult(true, time.Since(startTime).Milliseconds(), imageMimeType)
 		logToolInvocation(name, toolName, input, textContent, nil, startTime)
 		return ToolResult{
 			Type:      "image",
@@ -98,6 +114,8 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 	}
 
 	if audioData != nil {
+		mcpSpan.SetOutput(textContent)
+		mcpSpan.SetResult(true, time.Since(startTime).Milliseconds(), audioMimeType)
 		logToolInvocation(name, toolName, input, textContent, nil, startTime)
 		return ToolResult{
 			Type:      "media",
@@ -107,6 +125,8 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 		}, nil
 	}
 
+	mcpSpan.SetOutput(textContent)
+	mcpSpan.SetResult(true, time.Since(startTime).Milliseconds(), "text")
 	logToolInvocation(name, toolName, input, textContent, nil, startTime)
 	return ToolResult{
 		Type:    "text",
@@ -134,13 +154,13 @@ func logToolInvocation(serverName, toolName, input, output string, err error, st
 // RefreshTools gets the updated list of tools from the MCP and updates the
 // global state.
 func RefreshTools(ctx context.Context, name string) {
-	session, ok := sessions.Get(name)
+	entry, ok := sessions.Get(name)
 	if !ok {
 		slog.Warn("refresh tools: no session", "name", name)
 		return
 	}
 
-	tools, err := getTools(ctx, session)
+	tools, err := getTools(ctx, entry.session)
 	if err != nil {
 		updateState(name, StateError, err, nil, Counts{})
 		return
@@ -150,7 +170,7 @@ func RefreshTools(ctx context.Context, name string) {
 
 	prev, _ := states.Get(name)
 	prev.Counts.Tools = toolCount
-	updateState(name, StateConnected, nil, session, prev.Counts)
+	updateState(name, StateConnected, nil, entry.session, prev.Counts)
 }
 
 func getTools(ctx context.Context, session *mcp.ClientSession) ([]*Tool, error) {

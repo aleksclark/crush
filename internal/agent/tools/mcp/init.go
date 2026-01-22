@@ -25,8 +25,25 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// sessionEntry holds a session and its cancel function for cleanup.
+type sessionEntry struct {
+	session *mcp.ClientSession
+	cancel  context.CancelFunc
+}
+
+// Close cancels any in-flight requests and closes the session.
+func (e sessionEntry) Close() error {
+	if e.cancel != nil {
+		e.cancel()
+	}
+	if e.session != nil {
+		return e.session.Close()
+	}
+	return nil
+}
+
 var (
-	sessions = csync.NewMap[string, *mcp.ClientSession]()
+	sessions = csync.NewMap[string, sessionEntry]()
 	states   = csync.NewMap[string, ClientInfo]()
 	broker   = pubsub.NewBroker[Event]()
 	initOnce sync.Once
@@ -134,7 +151,7 @@ func RestartServer(ctx context.Context, name string) error {
 		return err
 	}
 
-	tools, err := getTools(ctx, session)
+	tools, err := getTools(ctx, session.session)
 	if err != nil {
 		slog.Error("error listing tools", "error", err)
 		updateState(name, StateError, err, nil, Counts{})
@@ -142,7 +159,7 @@ func RestartServer(ctx context.Context, name string) error {
 		return err
 	}
 
-	prompts, err := getPrompts(ctx, session)
+	prompts, err := getPrompts(ctx, session.session)
 	if err != nil {
 		slog.Error("error listing prompts", "error", err)
 		updateState(name, StateError, err, nil, Counts{})
@@ -150,7 +167,7 @@ func RestartServer(ctx context.Context, name string) error {
 		return err
 	}
 
-	resources, err := getResources(ctx, session)
+	resources, err := getResources(ctx, session.session)
 	if err != nil {
 		slog.Error("error listing resources", "error", err)
 		// Resources are optional, so we don't fail.
@@ -162,7 +179,7 @@ func RestartServer(ctx context.Context, name string) error {
 	updateResources(name, resources)
 	sessions.Set(name, session)
 
-	updateState(name, StateConnected, nil, session, Counts{
+	updateState(name, StateConnected, nil, session.session, Counts{
 		Tools:     toolCount,
 		Prompts:   len(prompts),
 		Resources: len(resources),
@@ -242,7 +259,7 @@ func Close() error {
 	}()
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(2 * time.Second):
 	}
 	broker.Shutdown()
 	return nil
@@ -287,7 +304,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 				return
 			}
 
-			tools, err := getTools(ctx, session)
+			tools, err := getTools(ctx, session.session)
 			if err != nil {
 				slog.Error("error listing tools", "error", err)
 				updateState(name, StateError, err, nil, Counts{})
@@ -295,7 +312,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 				return
 			}
 
-			prompts, err := getPrompts(ctx, session)
+			prompts, err := getPrompts(ctx, session.session)
 			if err != nil {
 				slog.Error("error listing prompts", "error", err)
 				updateState(name, StateError, err, nil, Counts{})
@@ -303,7 +320,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 				return
 			}
 
-			resources, err := getResources(ctx, session)
+			resources, err := getResources(ctx, session.session)
 			if err != nil {
 				slog.Error("error listing resources", "error", err)
 				// Resources are optional, so we don't fail the connection.
@@ -315,7 +332,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 			updateResources(name, resources)
 			sessions.Set(name, session)
 
-			updateState(name, StateConnected, nil, session, Counts{
+			updateState(name, StateConnected, nil, session.session, Counts{
 				Tools:     toolCount,
 				Prompts:   len(prompts),
 				Resources: len(resources),
@@ -338,7 +355,7 @@ func WaitForInit(ctx context.Context) error {
 }
 
 func getOrRenewClient(ctx context.Context, name string) (*mcp.ClientSession, error) {
-	sess, ok := sessions.Get(name)
+	entry, ok := sessions.Get(name)
 	if !ok {
 		return nil, fmt.Errorf("mcp '%s' not available", name)
 	}
@@ -350,20 +367,20 @@ func getOrRenewClient(ctx context.Context, name string) (*mcp.ClientSession, err
 	timeout := mcpTimeout(m)
 	pingCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	err := sess.Ping(pingCtx, nil)
+	err := entry.session.Ping(pingCtx, nil)
 	if err == nil {
-		return sess, nil
+		return entry.session, nil
 	}
 	updateState(name, StateError, maybeTimeoutErr(err, timeout), nil, state.Counts)
 
-	sess, err = createSession(ctx, name, m, cfg.Resolver())
+	entry, err = createSession(ctx, name, m, cfg.Resolver())
 	if err != nil {
 		return nil, err
 	}
 
-	updateState(name, StateConnected, nil, sess, state.Counts)
-	sessions.Set(name, sess)
-	return sess, nil
+	updateState(name, StateConnected, nil, entry.session, state.Counts)
+	sessions.Set(name, entry)
+	return entry.session, nil
 }
 
 // updateState updates the state of an MCP client and publishes an event
@@ -393,7 +410,7 @@ func updateState(name string, state State, err error, client *mcp.ClientSession,
 	})
 }
 
-func createSession(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver) (*mcp.ClientSession, error) {
+func createSession(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver) (sessionEntry, error) {
 	timeout := mcpTimeout(m)
 	mcpCtx, cancel := context.WithCancel(ctx)
 	cancelTimer := time.AfterFunc(timeout, cancel)
@@ -404,7 +421,7 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 		slog.Error("error creating mcp client", "error", err, "name", name)
 		cancel()
 		cancelTimer.Stop()
-		return nil, err
+		return sessionEntry{}, err
 	}
 
 	client := mcp.NewClient(
@@ -439,12 +456,12 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 		slog.Error("MCP client failed to initialize", "error", err, "name", name)
 		cancel()
 		cancelTimer.Stop()
-		return nil, err
+		return sessionEntry{}, err
 	}
 
 	cancelTimer.Stop()
 	slog.Info("MCP client initialized", "name", name)
-	return session, nil
+	return sessionEntry{session: session, cancel: cancel}, nil
 }
 
 // maybeStdioErr if a stdio mcp prints an error in non-json format, it'll fail
