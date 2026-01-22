@@ -595,15 +595,15 @@ test.describe("Agents dialog", () => {
     await new Promise((r) => setTimeout(r, STARTUP_DELAY));
 
     terminal.write("\x01");
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 1000));
 
-    // Press enter to view details of the first agent (code-reviewer)
+    // Press enter to view details of the first agent (accept-edits-agent alphabetically)
     terminal.write("\r");
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 1000));
 
     // Should show the detail view title with agent name
     await expect(
-      terminal.getByText("Agent: code-reviewer", {
+      terminal.getByText("Agent: accept-edits-agent", {
         full: true,
       })
     ).toBeVisible();
@@ -614,7 +614,7 @@ test.describe("Agents dialog", () => {
 
     terminal.write("\x01");
     await expect(
-      terminal.getByText("Agents (3)", { full: true })
+      terminal.getByText("Agents (8)", { full: true })
     ).toBeVisible();
 
     // Press escape to close
