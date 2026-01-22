@@ -12,6 +12,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -315,6 +316,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
 			currentAssistant = &assistantMsg
+
+			// Capture request messages for tracing.
+			if currentLLMSpan != nil {
+				if reqJSON, jsonErr := json.Marshal(prepared.Messages); jsonErr == nil {
+					currentLLMSpan.SetRequest(string(reqJSON))
+				}
+			}
+
 			return callContext, prepared, err
 		},
 		OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
@@ -414,6 +423,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					stepResult.Usage.CacheCreationTokens,
 				)
 				currentLLMSpan.SetFinishReason(string(stepResult.FinishReason))
+
+				// Capture response content for tracing.
+				if respJSON, jsonErr := json.Marshal(stepResult.Response); jsonErr == nil {
+					currentLLMSpan.SetResponse(string(respJSON))
+				}
+
 				currentLLMSpan.End()
 				currentLLMSpan = nil
 			}

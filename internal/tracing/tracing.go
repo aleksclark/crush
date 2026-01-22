@@ -458,6 +458,21 @@ func (l *LLMSpan) SetFinishReason(reason string) {
 	}
 }
 
+// SetRequest sets the request messages sent to the LLM.
+// Messages are JSON-encoded and truncated to avoid excessive span size.
+func (l *LLMSpan) SetRequest(messages string) {
+	if l.span != nil {
+		l.span.SetAttributes(attribute.String("llm.request", truncate(messages, 10000)))
+	}
+}
+
+// SetResponse sets the response content from the LLM.
+func (l *LLMSpan) SetResponse(response string) {
+	if l.span != nil {
+		l.span.SetAttributes(attribute.String("llm.response", truncate(response, 10000)))
+	}
+}
+
 // Context returns the context with the LLM span.
 func (l *LLMSpan) Context() context.Context {
 	return l.ctx
