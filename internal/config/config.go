@@ -239,22 +239,32 @@ func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
 }
 
 type Options struct {
-	ContextPaths              []string     `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
-	SkillsPaths               []string     `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/crush/skills,example=./skills"`
-	TUI                       *TUIOptions  `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
-	Debug                     bool         `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
-	DebugLSP                  bool         `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
-	DisableAutoSummarize      bool         `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
-	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
-	DisabledTools             []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
-	AllowUnsafeCommands       []string     `json:"allow_unsafe_commands,omitempty" jsonschema:"description=List of normally-blocked bash commands to allow (e.g. curl or wget). Use with caution as these commands are blocked for security reasons,example=curl,example=wget"`
-	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
-	DisableDefaultProviders   bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled, providers must be fully specified in the config file with base_url, models, and api_key - no merging with defaults occurs,default=false"`
-	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
-	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
-	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
-	WorktreeMode              bool         `json:"worktree_mode,omitempty" jsonschema:"description=Enable git worktree mode. Each new session creates a git worktree in .crush-trees directory,default=false"`
-	AgentStatusDir            string       `json:"agent_status_dir,omitempty" jsonschema:"description=Directory for writing agent status files (follows Agent Status Reporting Standard). Set to empty string to disable. Supports ~ for home directory,example=~/.agent-status,example=/tmp/agent-status"`
+	ContextPaths              []string       `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
+	SkillsPaths               []string       `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/crush/skills,example=./skills"`
+	SubagentPaths             []string       `json:"subagent_paths,omitempty" jsonschema:"description=Additional paths to directories containing subagent definitions (.md files with YAML frontmatter). These are searched in addition to the default .crush/agents and .claude/agents directories,example=~/.config/crush/agents,example=./agents"`
+	TUI                       *TUIOptions    `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
+	Debug                     bool           `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
+	DebugLSP                  bool           `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
+	DisableAutoSummarize      bool           `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
+	DataDirectory             string         `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
+	DisabledTools             []string       `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
+	AllowUnsafeCommands       []string       `json:"allow_unsafe_commands,omitempty" jsonschema:"description=List of normally-blocked bash commands to allow (e.g. curl or wget). Use with caution as these commands are blocked for security reasons,example=curl,example=wget"`
+	DisableProviderAutoUpdate bool           `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
+	DisableDefaultProviders   bool           `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled, providers must be fully specified in the config file with base_url, models, and api_key - no merging with defaults occurs,default=false"`
+	Attribution               *Attribution   `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
+	DisableMetrics            bool           `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
+	InitializeAs              string         `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	WorktreeMode              bool           `json:"worktree_mode,omitempty" jsonschema:"description=Enable git worktree mode. Each new session creates a git worktree in .crush-trees directory,default=false"`
+	AgentStatusDir            string         `json:"agent_status_dir,omitempty" jsonschema:"description=Directory for writing agent status files (follows Agent Status Reporting Standard). Set to empty string to disable. Supports ~ for home directory,example=~/.agent-status,example=/tmp/agent-status"`
+	Tracing                   *TracingConfig `json:"tracing,omitempty" jsonschema:"description=OpenTelemetry tracing configuration for exporting session traces"`
+}
+
+// TracingConfig holds configuration for OpenTelemetry tracing.
+type TracingConfig struct {
+	// Endpoint is the OTLP gRPC endpoint (e.g., "localhost:4317").
+	Endpoint string `json:"endpoint,omitempty" jsonschema:"description=OTLP gRPC endpoint for trace export,example=localhost:4317,example=otel-collector:4317"`
+	// Insecure disables TLS for the OTLP connection.
+	Insecure bool `json:"insecure,omitempty" jsonschema:"description=Disable TLS for OTLP connection (use for local collectors),default=false"`
 }
 
 type MCPs map[string]MCPConfig

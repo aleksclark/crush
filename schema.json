@@ -371,6 +371,17 @@ Notice: Behaving like ASDF_GOLANG_MOD_VERSION_ENABLED=true
           "type": "array",
           "description": "Paths to directories containing Agent Skills (folders with SKILL.md files)"
         },
+        "subagent_paths": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "~/.config/crush/agents",
+              "./agents"
+            ]
+          },
+          "type": "array",
+          "description": "Additional paths to directories containing subagent definitions (.md files with YAML frontmatter). These are searched in addition to the default .crush/agents and .claude/agents directories"
+        },
         "tui": {
           "$ref": "#/$defs/TUIOptions",
           "description": "Terminal user interface options"
@@ -454,6 +465,18 @@ Notice: Behaving like ASDF_GOLANG_MOD_VERSION_ENABLED=true
           "type": "boolean",
           "description": "Enable git worktree mode. Each new session creates a git worktree in .crush-trees directory",
           "default": false
+        },
+        "agent_status_dir": {
+          "type": "string",
+          "description": "Directory for writing agent status files (follows Agent Status Reporting Standard). Set to empty string to disable. Supports ~ for home directory",
+          "examples": [
+            "~/.agent-status",
+            "/tmp/agent-status"
+          ]
+        },
+        "tracing": {
+          "$ref": "#/$defs/TracingConfig",
+          "description": "OpenTelemetry tracing configuration for exporting session traces"
         }
       },
       "additionalProperties": false,
@@ -725,6 +748,25 @@ Notice: Behaving like ASDF_GOLANG_MOD_VERSION_ENABLED=true
       "required": [
         "ls"
       ]
+    },
+    "TracingConfig": {
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "description": "OTLP gRPC endpoint for trace export",
+          "examples": [
+            "localhost:4317",
+            "otel-collector:4317"
+          ]
+        },
+        "insecure": {
+          "type": "boolean",
+          "description": "Disable TLS for OTLP connection (use for local collectors)",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
     }
   }
 }

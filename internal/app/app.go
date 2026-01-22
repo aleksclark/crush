@@ -413,7 +413,8 @@ func (app *App) initSubagentRegistry(ctx context.Context) error {
 	// Build watch paths.
 	// Use directory of global config as user config dir.
 	userConfigDir := filepath.Dir(config.GlobalConfig())
-	watchPaths := subagent.DiscoverPaths(app.config.WorkingDir(), userConfigDir)
+	additionalPaths := app.config.Options.SubagentPaths
+	watchPaths := subagent.DiscoverPaths(app.config.WorkingDir(), userConfigDir, additionalPaths)
 
 	app.SubagentRegistry = subagent.NewRegistry(watchPaths)
 
@@ -610,7 +611,7 @@ func (app *App) Shutdown() {
 	})
 
 	// Shutdown all LSP clients.
-	shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 2*time.Second)
 	defer cancel()
 	for name, client := range app.LSPClients.Seq2() {
 		wg.Go(func() {
@@ -634,6 +635,14 @@ func (app *App) Shutdown() {
 		}
 	}
 	wg.Wait()
+}
+
+// AddCleanupFunc adds a cleanup function to be called during shutdown.
+func (app *App) AddCleanupFunc(fn func()) {
+	app.cleanupFuncs = append(app.cleanupFuncs, func() error {
+		fn()
+		return nil
+	})
 }
 
 // checkForUpdates checks for available updates.

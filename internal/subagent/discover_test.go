@@ -14,12 +14,16 @@ func TestDiscoverPaths(t *testing.T) {
 	projectDir := filepath.Join("project")
 	userDir := filepath.Join("home", "user", ".config", "crush")
 
-	paths := DiscoverPaths(projectDir, userDir)
+	paths := DiscoverPaths(projectDir, userDir, nil)
 
-	require.Len(t, paths, 3)
+	// Should have 4 paths: project/.crush/agents, project/.claude/agents, userDir/agents, ~/.claude/agents
+	require.Len(t, paths, 4)
 	require.Equal(t, filepath.Join(projectDir, ".crush", "agents"), paths[0])
 	require.Equal(t, filepath.Join(projectDir, ".claude", "agents"), paths[1])
 	require.Equal(t, filepath.Join(userDir, "agents"), paths[2])
+	// Last path is ~/.claude/agents
+	home, _ := os.UserHomeDir()
+	require.Equal(t, filepath.Join(home, ".claude", "agents"), paths[3])
 }
 
 func TestDiscoverPathsEmptyWorkingDir(t *testing.T) {
@@ -27,10 +31,13 @@ func TestDiscoverPathsEmptyWorkingDir(t *testing.T) {
 
 	userDir := filepath.Join("home", "user", ".config", "crush")
 
-	paths := DiscoverPaths("", userDir)
+	paths := DiscoverPaths("", userDir, nil)
 
-	require.Len(t, paths, 1)
+	// Should have 2 paths: userDir/agents and ~/.claude/agents
+	require.Len(t, paths, 2)
 	require.Equal(t, filepath.Join(userDir, "agents"), paths[0])
+	home, _ := os.UserHomeDir()
+	require.Equal(t, filepath.Join(home, ".claude", "agents"), paths[1])
 }
 
 func TestDiscoverPathsEmptyUserDir(t *testing.T) {
@@ -38,11 +45,38 @@ func TestDiscoverPathsEmptyUserDir(t *testing.T) {
 
 	projectDir := filepath.Join("project")
 
-	paths := DiscoverPaths(projectDir, "")
+	paths := DiscoverPaths(projectDir, "", nil)
 
-	require.Len(t, paths, 2)
+	// Should have 3 paths: project/.crush/agents, project/.claude/agents, ~/.claude/agents
+	require.Len(t, paths, 3)
 	require.Equal(t, filepath.Join(projectDir, ".crush", "agents"), paths[0])
 	require.Equal(t, filepath.Join(projectDir, ".claude", "agents"), paths[1])
+	home, _ := os.UserHomeDir()
+	require.Equal(t, filepath.Join(home, ".claude", "agents"), paths[2])
+}
+
+func TestDiscoverPathsWithAdditionalPaths(t *testing.T) {
+	t.Parallel()
+
+	projectDir := filepath.Join("project")
+	userDir := filepath.Join("home", "user", ".config", "crush")
+	additionalPaths := []string{"/custom/agents", "/another/path"}
+
+	paths := DiscoverPaths(projectDir, userDir, additionalPaths)
+
+	// Should have 6 paths: 2 additional + 2 project + 1 user + 1 home/.claude/agents
+	require.Len(t, paths, 6)
+	// Additional paths have highest priority.
+	require.Equal(t, "/custom/agents", paths[0])
+	require.Equal(t, "/another/path", paths[1])
+	// Then project-level.
+	require.Equal(t, filepath.Join(projectDir, ".crush", "agents"), paths[2])
+	require.Equal(t, filepath.Join(projectDir, ".claude", "agents"), paths[3])
+	// Then user-level.
+	require.Equal(t, filepath.Join(userDir, "agents"), paths[4])
+	// Then ~/.claude/agents.
+	home, _ := os.UserHomeDir()
+	require.Equal(t, filepath.Join(home, ".claude", "agents"), paths[5])
 }
 
 func TestDiscover(t *testing.T) {

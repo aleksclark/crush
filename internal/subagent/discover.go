@@ -19,8 +19,12 @@ const (
 )
 
 // DiscoverPaths returns the standard paths to search for subagent definitions.
-func DiscoverPaths(workingDir, userConfigDir string) []string {
+// Additional paths are prepended (higher priority than defaults).
+func DiscoverPaths(workingDir, userConfigDir string, additionalPaths []string) []string {
 	var paths []string
+
+	// Additional paths have highest priority.
+	paths = append(paths, additionalPaths...)
 
 	// Project-level paths (higher priority).
 	if workingDir != "" {
@@ -31,6 +35,11 @@ func DiscoverPaths(workingDir, userConfigDir string) []string {
 	// User-level paths (lower priority).
 	if userConfigDir != "" {
 		paths = append(paths, filepath.Join(userConfigDir, "agents"))
+	}
+
+	// Home directory ~/.claude/agents for Claude Code compatibility.
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths, filepath.Join(home, ClaudeAgentsDir))
 	}
 
 	return paths
