@@ -257,6 +257,7 @@ type Options struct {
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	MaxSteps                  int          `json:"max_steps,omitempty" jsonschema:"description=Maximum number of agent steps per request. 0 means unlimited,default=0,minimum=0,example=50"`
 }
 
 type MCPs map[string]MCPConfig
