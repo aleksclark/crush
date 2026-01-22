@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -125,9 +126,35 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 		} else {
 			response = fantasy.NewMediaResponse(result.Data, result.MediaType)
 		}
-		response.Content = result.Content
+		response.Content = truncateMCPOutput(result.Content)
 		return response, nil
 	default:
-		return fantasy.NewTextResponse(result.Content), nil
+		return fantasy.NewTextResponse(truncateMCPOutput(result.Content)), nil
 	}
+}
+
+// MCPMaxOutputLength limits MCP tool text output to prevent context overflow.
+// Matches the bash tool MaxOutputLength for consistency.
+const MCPMaxOutputLength = 30000
+
+// truncateMCPOutput truncates content that exceeds the maximum length,
+// preserving both the beginning and end of the output for context.
+func truncateMCPOutput(content string) string {
+	if len(content) <= MCPMaxOutputLength {
+		return content
+	}
+
+	halfLength := MCPMaxOutputLength / 2
+	start := content[:halfLength]
+	end := content[len(content)-halfLength:]
+
+	truncatedLinesCount := countMCPLines(content[halfLength : len(content)-halfLength])
+	return fmt.Sprintf("%s\n\n... [%d lines truncated] ...\n\n%s", start, truncatedLinesCount, end)
+}
+
+func countMCPLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	return len(strings.Split(s, "\n"))
 }
