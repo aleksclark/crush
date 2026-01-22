@@ -47,13 +47,13 @@ func GetPromptMessages(ctx context.Context, clientName, promptName string, args 
 // RefreshPrompts gets the updated list of prompts from the MCP and updates the
 // global state.
 func RefreshPrompts(ctx context.Context, name string) {
-	session, ok := sessions.Get(name)
+	entry, ok := sessions.Get(name)
 	if !ok {
 		slog.Warn("refresh prompts: no session", "name", name)
 		return
 	}
 
-	prompts, err := getPrompts(ctx, session)
+	prompts, err := getPrompts(ctx, entry.session)
 	if err != nil {
 		updateState(name, StateError, err, nil, Counts{})
 		return
@@ -63,7 +63,7 @@ func RefreshPrompts(ctx context.Context, name string) {
 
 	prev, _ := states.Get(name)
 	prev.Counts.Prompts = len(prompts)
-	updateState(name, StateConnected, nil, session, prev.Counts)
+	updateState(name, StateConnected, nil, entry.session, prev.Counts)
 }
 
 func getPrompts(ctx context.Context, c *mcp.ClientSession) ([]*Prompt, error) {
