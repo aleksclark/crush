@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -21,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/crush/internal/tracing"
 	"github.com/charmbracelet/crush/internal/tui"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/fang"
@@ -221,6 +223,9 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		event.Init()
 	}
 
+	// Initialize tracing if configured.
+	initTracing(cfg, appInstance)
+
 	return appInstance, nil
 }
 
@@ -235,6 +240,33 @@ func shouldEnableMetrics() bool {
 		return false
 	}
 	return true
+}
+
+func initTracing(cfg *config.Config, appInstance *app.App) {
+	if cfg.Options.Tracing == nil || cfg.Options.Tracing.Endpoint == "" {
+		return
+	}
+
+	tracingCfg := tracing.Config{
+		Endpoint:       cfg.Options.Tracing.Endpoint,
+		ServiceName:    "crush",
+		ServiceVersion: version.Version,
+		Insecure:       cfg.Options.Tracing.Insecure,
+	}
+
+	if err := tracing.Init(tracingCfg); err != nil {
+		slog.Warn("Failed to initialize tracing", "error", err)
+		return
+	}
+
+	// Add tracing shutdown to app cleanup.
+	appInstance.AddCleanupFunc(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := tracing.Shutdown(ctx); err != nil {
+			slog.Warn("Failed to shutdown tracing", "error", err)
+		}
+	})
 }
 
 func MaybePrependStdin(prompt string) (string, error) {

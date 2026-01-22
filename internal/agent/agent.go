@@ -39,7 +39,9 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/crush/internal/tracing"
 	"github.com/charmbracelet/x/exp/charmtone"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const (
@@ -171,11 +173,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return nil, nil
 	}
 
+	// Start session tracing span.
+	sessionSpan := tracing.StartSession(ctx, call.SessionID, call.Prompt)
+	defer sessionSpan.End()
+	ctx = sessionSpan.Context()
+
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := a.tools.Copy()
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
+
+	// Add model info to tracing span.
+	sessionSpan.SetAttributes(
+		attribute.String("llm.provider", largeModel.ModelCfg.Provider),
+		attribute.String("llm.model", largeModel.ModelCfg.Model),
+	)
 
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
@@ -232,6 +245,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
+	var currentLLMSpan *tracing.LLMSpan
+	var stepCount int
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
@@ -243,6 +258,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		PresencePenalty:  call.PresencePenalty,
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
+		OnStepStart: func(stepNumber int) error {
+			stepCount = stepNumber
+			currentLLMSpan = tracing.StartLLMCall(ctx, largeModel.ModelCfg.Provider, largeModel.ModelCfg.Model, 0)
+			return nil
+		},
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			for i := range prepared.Messages {
@@ -386,6 +406,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return createMsgErr
 		},
 		OnStepFinish: func(stepResult fantasy.StepResult) error {
+			// End the LLM span and record usage.
+			if currentLLMSpan != nil {
+				currentLLMSpan.SetUsage(
+					stepResult.Usage.OutputTokens,
+					stepResult.Usage.CacheReadTokens,
+					stepResult.Usage.CacheCreationTokens,
+				)
+				currentLLMSpan.SetFinishReason(string(stepResult.FinishReason))
+				currentLLMSpan.End()
+				currentLLMSpan = nil
+			}
+
 			finishReason := message.FinishReasonUnknown
 			switch stepResult.FinishReason {
 			case fantasy.FinishReasonLength:
@@ -417,6 +449,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				)
 				a.statusReporter.UpdateCost(updatedSession.Cost)
 			}
+
+			// Add token usage to session tracing span (cumulative).
+			sessionSpan.SetAttributes(
+				attribute.Int64("llm.total_input_tokens", updatedSession.PromptTokens),
+				attribute.Int64("llm.total_output_tokens", updatedSession.CompletionTokens),
+				attribute.Int("llm.step_count", stepCount),
+				attribute.Float64("session.cost_usd", updatedSession.Cost),
+			)
 
 			if sessionErr != nil {
 				return sessionErr
@@ -450,6 +490,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
 
 	if err != nil {
+		// Record error in tracing span.
+		sessionSpan.SetError(err)
+
 		isCancelErr := errors.Is(err, context.Canceled)
 		isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
 		if currentAssistant == nil {

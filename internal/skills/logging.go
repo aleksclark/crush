@@ -2,6 +2,7 @@
 package skills
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/tracing"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -83,6 +85,14 @@ func LogUsage(entry LogEntry) {
 	if entry.SessionID == "" {
 		entry.SessionID = GetSessionID()
 	}
+
+	// Emit tracing span for skill usage.
+	skillSpan := tracing.StartSkillUsage(context.Background(), entry.SkillName, entry.Action, entry.SessionID)
+	skillSpan.SetResult(entry.Success, entry.FilePath, entry.DurationMs)
+	if !entry.Success && entry.Error != "" {
+		skillSpan.SetError(fmt.Errorf("%s", entry.Error))
+	}
+	skillSpan.End()
 
 	logger := getLogger(entry.SkillName)
 	if logger == nil {

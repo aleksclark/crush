@@ -536,7 +536,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, permis
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
-	return filteredTools, nil
+	return tools.WrapAllWithTracing(filteredTools), nil
 }
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
