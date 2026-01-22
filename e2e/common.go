@@ -43,8 +43,10 @@ func TestConfigJSON() string {
 // IsolationScript returns bash commands to isolate from user config.
 func IsolationScript() string {
 	return `
+export HOME="$TMPDIR/home"
 export XDG_CONFIG_HOME="$TMPDIR/config"
 export XDG_DATA_HOME="$TMPDIR/data"
+mkdir -p "$HOME"
 mkdir -p "$XDG_CONFIG_HOME/crush"
 mkdir -p "$XDG_DATA_HOME/crush"
 `

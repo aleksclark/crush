@@ -142,28 +142,13 @@ tasks:
       - go mod tidy
 
   e2e:
-    desc: Run E2E tests using tui-test
+    desc: Run E2E tests using trifle
     deps: [build]
-    dir: e2e
     cmds:
-      - npm test {{.CLI_ARGS}}
-
-  e2e:trace:
-    desc: Run E2E tests with tracing enabled
-    deps: [build]
-    dir: e2e
-    cmds:
-      - npm run test:trace {{.CLI_ARGS}}
+      - go test -v -count=1 ./e2e/... {{.CLI_ARGS}}
 
   e2e:update:
     desc: Update E2E test snapshots
     deps: [build]
-    dir: e2e
     cmds:
-      - npm run test:update {{.CLI_ARGS}}
-
-  e2e:install:
-    desc: Install E2E test dependencies
-    dir: e2e
-    cmds:
-      - npm install
+      - go test -v -count=1 ./e2e/... -update {{.CLI_ARGS}}

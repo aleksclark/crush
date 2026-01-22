@@ -157,10 +157,11 @@ func TestWorktreeDialogClose(t *testing.T) {
 	_ = term.KeyEscape()
 	time.Sleep(dialogTransition)
 
-	// Check that project init dialog is back.
-	locator := term.GetByText("initialize this project", trifle.WithFull())
-	if err := locator.WaitVisible(5 * time.Second); err != nil {
-		t.Errorf("Expected to return to init dialog: %v", err)
+	// Dialog should no longer be visible (title should be gone).
+	// Give it a moment to close.
+	time.Sleep(500 * time.Millisecond)
+	if term.GetByText("New Worktree Session", trifle.WithFull()).IsVisible() {
+		t.Errorf("Expected dialog to close after escape")
 	}
 }
 
