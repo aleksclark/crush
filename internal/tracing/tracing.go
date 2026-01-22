@@ -8,8 +8,10 @@ package tracing
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -400,8 +402,9 @@ func (s *SkillSpan) Context() context.Context {
 
 // LLMSpan represents an active LLM call span.
 type LLMSpan struct {
-	span trace.Span
-	ctx  context.Context
+	span   trace.Span
+	ctx    context.Context
+	spanID string
 }
 
 // StartLLMCall starts a child span for an LLM API call.
@@ -420,8 +423,9 @@ func StartLLMCall(ctx context.Context, provider, model string, inputTokens int64
 	)
 
 	return &LLMSpan{
-		span: span,
-		ctx:  ctx,
+		span:   span,
+		ctx:    ctx,
+		spanID: span.SpanContext().SpanID().String(),
 	}
 }
 
@@ -458,19 +462,58 @@ func (l *LLMSpan) SetFinishReason(reason string) {
 	}
 }
 
-// SetRequest sets the request messages sent to the LLM.
-// Messages are JSON-encoded and truncated to avoid excessive span size.
+// SetRequest writes the request messages to a JSON file and stores the path.
 func (l *LLMSpan) SetRequest(messages string) {
 	if l.span != nil {
-		l.span.SetAttributes(attribute.String("llm.request", truncate(messages, 10000)))
+		if path, err := l.writeTraceFile("request", messages); err == nil {
+			l.span.SetAttributes(attribute.String("llm.request_file", path))
+		} else {
+			slog.Debug("failed to write request trace file", "error", err)
+		}
 	}
 }
 
-// SetResponse sets the response content from the LLM.
+// SetResponse writes the response content to a JSON file and stores the path.
 func (l *LLMSpan) SetResponse(response string) {
 	if l.span != nil {
-		l.span.SetAttributes(attribute.String("llm.response", truncate(response, 10000)))
+		if path, err := l.writeTraceFile("response", response); err == nil {
+			l.span.SetAttributes(attribute.String("llm.response_file", path))
+		} else {
+			slog.Debug("failed to write response trace file", "error", err)
+		}
 	}
+}
+
+// writeTraceFile writes content to a trace file and returns the absolute path.
+func (l *LLMSpan) writeTraceFile(kind, content string) (string, error) {
+	dir, err := getTraceDir()
+	if err != nil {
+		return "", err
+	}
+
+	filename := fmt.Sprintf("%s_%s.json", l.spanID, kind)
+	path := filepath.Join(dir, filename)
+
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("write trace file: %w", err)
+	}
+
+	return path, nil
+}
+
+// getTraceDir returns the directory for trace files, creating it if needed.
+func getTraceDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("get home dir: %w", err)
+	}
+
+	dir := filepath.Join(home, ".cache", "crush", "traces")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create trace dir: %w", err)
+	}
+
+	return dir, nil
 }
 
 // Context returns the context with the LLM span.

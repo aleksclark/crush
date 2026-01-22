@@ -261,10 +261,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		FrequencyPenalty: call.FrequencyPenalty,
 		OnStepStart: func(stepNumber int) error {
 			stepCount = stepNumber
-			currentLLMSpan = tracing.StartLLMCall(ctx, largeModel.ModelCfg.Provider, largeModel.ModelCfg.Model, 0)
 			return nil
 		},
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			// Start LLM span here since PrepareStep is called before OnStepStart.
+			currentLLMSpan = tracing.StartLLMCall(ctx, largeModel.ModelCfg.Provider, largeModel.ModelCfg.Model, 0)
 			prepared.Messages = options.Messages
 			for i := range prepared.Messages {
 				prepared.Messages[i].ProviderOptions = nil
