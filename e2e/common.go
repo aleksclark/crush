@@ -98,6 +98,13 @@ func NewIsolatedTerminal(t *testing.T, cols, rows int) *vttest.Terminal {
 // using the provided config JSON string.
 func NewIsolatedTerminalWithConfig(t *testing.T, cols, rows int, configJSON string) *vttest.Terminal {
 	t.Helper()
+	return NewIsolatedTerminalWithEnv(t, cols, rows, configJSON, nil)
+}
+
+// NewIsolatedTerminalWithEnv creates a terminal with isolated config environment
+// using the provided config JSON string and additional environment variables.
+func NewIsolatedTerminalWithEnv(t *testing.T, cols, rows int, configJSON string, extraEnv map[string]string) *vttest.Terminal {
+	t.Helper()
 
 	tmpDir := t.TempDir()
 
@@ -135,6 +142,10 @@ func NewIsolatedTerminalWithConfig(t *testing.T, cols, rows int, configJSON stri
 		"USERPROFILE="+tmpDir, // Windows equivalent of HOME
 		"CRUSH_NEW_UI=true",   // Use new UI for all e2e tests
 	)
+	// Add extra environment variables.
+	for k, v := range extraEnv {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
 	if err := term.Start(cmd); err != nil {
 		term.Close()
 		t.Fatalf("Failed to start crush: %v", err)

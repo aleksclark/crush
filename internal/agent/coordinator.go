@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
+	"github.com/charmbracelet/crush/internal/agent/status"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -106,6 +107,15 @@ func NewCoordinator(
 	if err != nil {
 		return nil, err
 	}
+
+	// Set up status reporter if CRUSH_STATUS_FILE is set.
+	if statusPath := os.Getenv("CRUSH_STATUS_FILE"); statusPath != "" {
+		reporter := status.NewReporter(statusPath)
+		agent.SetStatusReporter(reporter)
+		// Write initial idle state.
+		_ = reporter.SetIdle()
+	}
+
 	c.currentAgent = agent
 	c.agents[config.AgentCoder] = agent
 	return c, nil

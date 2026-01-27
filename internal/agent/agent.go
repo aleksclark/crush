@@ -77,6 +77,7 @@ type SessionAgent interface {
 	SetModels(large Model, small Model)
 	SetTools(tools []fantasy.AgentTool)
 	SetSystemPrompt(systemPrompt string)
+	SetStatusReporter(reporter StatusReporter)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -86,6 +87,14 @@ type SessionAgent interface {
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	Model() Model
+}
+
+// StatusReporter reports agent status changes.
+type StatusReporter interface {
+	SetIdle() error
+	SetThinking(sessionID string) error
+	SetStreaming(sessionID string) error
+	SetToolRunning(sessionID, toolName, toolID, description string) error
 }
 
 type Model struct {
@@ -109,6 +118,8 @@ type sessionAgent struct {
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
+
+	statusReporter StatusReporter
 }
 
 type SessionAgentOptions struct {
@@ -219,6 +230,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
+	a.reportStatus(func(r StatusReporter) { r.SetThinking(call.SessionID) })
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
@@ -321,12 +333,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			// newlines are very visible.
 			if len(currentAssistant.Parts) == 0 {
 				text = strings.TrimPrefix(text, "\n")
+				// Set streaming status on first text.
+				a.reportStatus(func(r StatusReporter) { r.SetStreaming(call.SessionID) })
 			}
 
 			currentAssistant.AppendContent(text)
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnToolInputStart: func(id string, toolName string) error {
+			a.reportStatus(func(r StatusReporter) { r.SetToolRunning(call.SessionID, toolName, id, "") })
 			toolCall := message.ToolCall{
 				ID:               id,
 				Name:             toolName,
@@ -504,8 +519,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		// cancelled.
 		updateErr := a.messages.Update(ctx, *currentAssistant)
 		if updateErr != nil {
+			a.reportStatus(func(r StatusReporter) { r.SetIdle() })
 			return nil, updateErr
 		}
+		a.reportStatus(func(r StatusReporter) { r.SetIdle() })
 		return nil, err
 	}
 
@@ -532,6 +549,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	queuedMessages, ok := a.messageQueue.Get(call.SessionID)
 	if !ok || len(queuedMessages) == 0 {
+		a.reportStatus(func(r StatusReporter) { r.SetIdle() })
 		return result, err
 	}
 	// There are queued messages restart the loop.
@@ -993,6 +1011,17 @@ func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 
 func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
 	a.systemPrompt.Set(systemPrompt)
+}
+
+func (a *sessionAgent) SetStatusReporter(reporter StatusReporter) {
+	a.statusReporter = reporter
+}
+
+// reportStatus calls the status reporter if one is set.
+func (a *sessionAgent) reportStatus(fn func(StatusReporter)) {
+	if a.statusReporter != nil {
+		fn(a.statusReporter)
+	}
 }
 
 func (a *sessionAgent) Model() Model {
