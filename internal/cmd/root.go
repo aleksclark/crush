@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/projects"
+	"github.com/charmbracelet/crush/internal/telemetry"
 	"github.com/charmbracelet/crush/internal/tui"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
@@ -237,6 +238,9 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		event.Init()
 	}
 
+	// Initialize telemetry if configured.
+	initTelemetry(ctx, cfg)
+
 	return appInstance, nil
 }
 
@@ -251,6 +255,26 @@ func shouldEnableMetrics() bool {
 		return false
 	}
 	return true
+}
+
+func initTelemetry(ctx context.Context, cfg *config.Config) {
+	var telemetryCfg telemetry.Config
+	if cfg.Options.Telemetry != nil {
+		telemetryCfg = telemetry.Config{
+			Enabled:          cfg.Options.Telemetry.Enabled,
+			Endpoint:         cfg.Options.Telemetry.Endpoint,
+			Protocol:         cfg.Options.Telemetry.Protocol,
+			ServiceName:      cfg.Options.Telemetry.ServiceName,
+			CaptureContent:   cfg.Options.Telemetry.CaptureContent,
+			MaxContentLength: cfg.Options.Telemetry.MaxContentLength,
+			SampleRate:       cfg.Options.Telemetry.SampleRate,
+			Headers:          cfg.Options.Telemetry.Headers,
+		}
+	}
+
+	if err := telemetry.Init(ctx, telemetryCfg, version.Version); err != nil {
+		slog.Warn("failed to initialize telemetry", "error", err)
+	}
 }
 
 func MaybePrependStdin(prompt string) (string, error) {
