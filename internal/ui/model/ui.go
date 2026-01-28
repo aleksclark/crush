@@ -304,6 +304,11 @@ func (m *UI) Init() tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
+	if m.state == uiOnboarding {
+		if cmd := m.openModelsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
