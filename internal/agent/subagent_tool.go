@@ -228,7 +228,7 @@ func (c *coordinator) buildSubagentTools(ctx context.Context, agent config.Agent
 	}
 
 	allTools = append(allTools,
-		tools.NewBashTool(permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
+		tools.NewBashTool(permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName, c.cfg.Options.AllowUnsafeCommands),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(permissions, c.cfg.WorkingDir(), nil),

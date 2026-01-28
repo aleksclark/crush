@@ -406,7 +406,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	}
 
 	allTools = append(allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName, c.cfg.Options.AllowUnsafeCommands),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewOutputHeadTool(),
