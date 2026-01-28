@@ -364,12 +364,23 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
+
+	// Add the default agent tool (read-only task agent).
 	if slices.Contains(agent.AllowedTools, AgentToolName) {
 		agentTool, err := c.agentTool(ctx)
 		if err != nil {
 			return nil, err
 		}
 		allTools = append(allTools, agentTool)
+	}
+
+	// Add user-defined subagents tool (full tool access).
+	if slices.Contains(agent.AllowedTools, SubagentToolName) {
+		subagentTool, err := c.subagentTool(ctx)
+		if err != nil {
+			return nil, err
+		}
+		allTools = append(allTools, subagentTool)
 	}
 
 	if slices.Contains(agent.AllowedTools, tools.AgenticFetchToolName) {
