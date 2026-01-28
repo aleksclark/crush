@@ -403,6 +403,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
+		tools.NewOutputHeadTool(),
+		tools.NewOutputTailTool(),
+		tools.NewOutputGrepTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewEditTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
 		tools.NewMultiEditTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
@@ -452,7 +455,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
-	return filteredTools, nil
+	return tools.WrapAllWithCaching(filteredTools), nil
 }
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
