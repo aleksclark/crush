@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,34 +13,59 @@ import (
 )
 
 // TestStatusReporting verifies that agent status is written to a file
-// when CRUSH_STATUS_FILE is set.
+// when agent_status_dir is configured.
 func TestStatusReporting(t *testing.T) {
 	SkipIfE2EDisabled(t)
 
 	tmpDir := t.TempDir()
-	statusPath := filepath.Join(tmpDir, "status.json")
+	statusDir := filepath.Join(tmpDir, "status")
 
-	// Create isolated terminal with status file configured.
-	term := NewIsolatedTerminalWithEnv(t, 120, 40, TestConfigJSON(), map[string]string{
-		"CRUSH_STATUS_FILE": statusPath,
-	})
+	// Create config JSON with status dir configured.
+	configJSON := `{
+  "providers": {
+    "test": {
+      "type": "openai-compat",
+      "base_url": "http://localhost:9999",
+      "api_key": "test-key"
+    }
+  },
+  "models": {
+    "large": { "provider": "test", "model": "test-model" },
+    "small": { "provider": "test", "model": "test-model" }
+  },
+  "options": {
+    "agent_status_dir": "` + strings.ReplaceAll(statusDir, `\`, `\\`) + `"
+  }
+}`
+
+	// Create isolated terminal with status dir configured via config.
+	term := NewIsolatedTerminalWithConfig(t, 120, 40, configJSON)
 	defer term.Close()
 
 	// Wait for startup.
 	time.Sleep(startupDelay)
 
-	// Verify status file exists (crush should write idle state on startup).
-	// Give it some extra time for the status to be written.
+	// Verify status file exists in the directory (crush should write idle state on startup).
+	// The filename includes the PID, so we need to find it.
 	var statusData status.Status
 	require.Eventually(t, func() bool {
-		data, err := os.ReadFile(statusPath)
+		entries, err := os.ReadDir(statusDir)
 		if err != nil {
 			return false
 		}
-		if err := json.Unmarshal(data, &statusData); err != nil {
-			return false
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), "status-") && strings.HasSuffix(entry.Name(), ".json") {
+				data, err := os.ReadFile(filepath.Join(statusDir, entry.Name()))
+				if err != nil {
+					continue
+				}
+				if err := json.Unmarshal(data, &statusData); err != nil {
+					continue
+				}
+				return statusData.State == status.StateIdle
+			}
 		}
-		return statusData.State == status.StateIdle
+		return false
 	}, 5*time.Second, 100*time.Millisecond, "status file should show idle state")
 
 	// Verify the status file structure.

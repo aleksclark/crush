@@ -257,6 +257,7 @@ type Options struct {
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	AgentStatusDir            string       `json:"agent_status_dir,omitempty" jsonschema:"description=Directory where agent status files are written. When set, Crush writes a JSON status file to this directory that external tools can read to monitor agent state."`
 }
 
 type MCPs map[string]MCPConfig

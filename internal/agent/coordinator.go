@@ -108,9 +108,9 @@ func NewCoordinator(
 		return nil, err
 	}
 
-	// Set up status reporter if CRUSH_STATUS_FILE is set.
-	if statusPath := os.Getenv("CRUSH_STATUS_FILE"); statusPath != "" {
-		reporter := status.NewReporter(statusPath)
+	// Set up status reporter if configured.
+	if cfg.Options != nil && cfg.Options.AgentStatusDir != "" {
+		reporter := status.NewReporterInDir(cfg.Options.AgentStatusDir)
 		agent.SetStatusReporter(reporter)
 		// Write initial idle state.
 		_ = reporter.SetIdle()

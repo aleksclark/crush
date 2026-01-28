@@ -5,6 +5,7 @@ package status
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -68,6 +69,16 @@ func NewReporter(filePath string) *Reporter {
 			UpdatedAt: time.Now(),
 		},
 	}
+}
+
+// NewReporterInDir creates a new status reporter that writes to a unique file
+// in the given directory. The filename is based on the process ID.
+func NewReporterInDir(dir string) *Reporter {
+	if dir == "" {
+		return &Reporter{enabled: false}
+	}
+	filePath := filepath.Join(dir, fmt.Sprintf("status-%d.json", os.Getpid()))
+	return NewReporter(filePath)
 }
 
 // DefaultStatusPath returns the default path for the status file.

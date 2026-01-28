@@ -176,3 +176,42 @@ func TestReporter_Close(t *testing.T) {
 	// Should be idle after close.
 	require.Equal(t, StateIdle, status.State)
 }
+
+func TestNewReporterInDir(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	r := NewReporterInDir(dir)
+	err := r.SetIdle()
+	require.NoError(t, err)
+
+	// Verify file was created with PID-based name.
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Contains(t, entries[0].Name(), "status-")
+	require.Contains(t, entries[0].Name(), ".json")
+
+	// Read and verify content.
+	data, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	require.NoError(t, err)
+
+	var status Status
+	err = json.Unmarshal(data, &status)
+	require.NoError(t, err)
+	require.Equal(t, StateIdle, status.State)
+}
+
+func TestNewReporterInDir_EmptyDir(t *testing.T) {
+	t.Parallel()
+
+	// Empty directory path should disable reporting.
+	r := NewReporterInDir("")
+	require.NoError(t, r.SetIdle())
+	require.NoError(t, r.SetThinking("session-123"))
+
+	// Should still track state internally.
+	status := r.Current()
+	require.Equal(t, StateThinking, status.State)
+}
