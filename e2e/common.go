@@ -98,6 +98,13 @@ func NewIsolatedTerminal(t *testing.T, cols, rows int) *vttest.Terminal {
 // using the provided config JSON string.
 func NewIsolatedTerminalWithConfig(t *testing.T, cols, rows int, configJSON string) *vttest.Terminal {
 	t.Helper()
+	return NewIsolatedTerminalWithConfigAndArgs(t, cols, rows, configJSON, nil)
+}
+
+// NewIsolatedTerminalWithConfigAndArgs creates a terminal with isolated config environment
+// using the provided config JSON string and additional command line arguments.
+func NewIsolatedTerminalWithConfigAndArgs(t *testing.T, cols, rows int, configJSON string, args []string) *vttest.Terminal {
+	t.Helper()
 
 	tmpDir := t.TempDir()
 
@@ -127,7 +134,7 @@ func NewIsolatedTerminalWithConfig(t *testing.T, cols, rows int, configJSON stri
 		t.Fatalf("Failed to create terminal: %v", err)
 	}
 
-	cmd := exec.CommandContext(context.Background(), CrushBinary())
+	cmd := exec.CommandContext(context.Background(), CrushBinary(), args...)
 	cmd.Env = append(os.Environ(),
 		"XDG_CONFIG_HOME="+filepath.Join(tmpDir, "config"),
 		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),
