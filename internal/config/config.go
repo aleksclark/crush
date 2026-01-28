@@ -259,6 +259,7 @@ type Options struct {
 	DisableMetrics            bool              `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
 	InitializeAs              string            `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
 	AutoLSP                   *bool             `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers"`
+	AgentStatusDir            string            `json:"agent_status_dir,omitempty" jsonschema:"description=Directory for writing agent status files (follows Agent Status Reporting Standard). Set to empty string to disable. Supports ~ for home directory,example=~/.agent-status,example=/tmp/agent-status"`
 }
 
 // TelemetryOptions configures OpenTelemetry tracing.

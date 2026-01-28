@@ -56,6 +56,9 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+
+	// Status reporting.
+	SetStatusReporter(reporter *StatusReporter)
 }
 
 type coordinator struct {
@@ -68,6 +71,9 @@ type coordinator struct {
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+
+	// Status reporter for agent status reporting.
+	statusReporter *StatusReporter
 
 	readyWg errgroup.Group
 }
@@ -814,6 +820,15 @@ func (c *coordinator) IsSessionBusy(sessionID string) bool {
 
 func (c *coordinator) Model() Model {
 	return c.currentAgent.Model()
+}
+
+// SetStatusReporter sets the status reporter for agent status reporting.
+func (c *coordinator) SetStatusReporter(reporter *StatusReporter) {
+	c.statusReporter = reporter
+	// Propagate to current agent.
+	if c.currentAgent != nil {
+		c.currentAgent.SetStatusReporter(reporter)
+	}
 }
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {

@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/agentstatus"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
@@ -56,6 +58,7 @@ type App struct {
 	Permissions permission.Service
 
 	AgentCoordinator agent.Coordinator
+	StatusReporter   *agentstatus.Reporter
 
 	LSPClients *csync.Map[string, *lsp.Client]
 
@@ -114,6 +117,12 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 
 	// cleanup database upon app shutdown
 	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close, mcp.Close)
+
+	// Initialize agent status reporter if configured.
+	if err := app.initStatusReporter(cfg); err != nil {
+		slog.Warn("Failed to initialize agent status reporter", "error", err)
+		// Non-fatal: continue without status reporting.
+	}
 
 	// TODO: remove the concept of agent config, most likely.
 	if !cfg.IsConfigured() {
@@ -467,6 +476,54 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
+
+	// Set status reporter if initialized.
+	if app.StatusReporter != nil {
+		app.AgentCoordinator.SetStatusReporter(app.StatusReporter)
+	}
+
+	return nil
+}
+
+// initStatusReporter initializes the agent status reporter if configured.
+func (app *App) initStatusReporter(cfg *config.Config) error {
+	// Check for AGENT_STATUS_DISABLE env var.
+	if os.Getenv("AGENT_STATUS_DISABLE") == "1" {
+		slog.Debug("Agent status reporting disabled via AGENT_STATUS_DISABLE")
+		return nil
+	}
+
+	// Determine the status directory: config > env var > disabled.
+	statusDir := ""
+	if cfg.Options != nil && cfg.Options.AgentStatusDir != "" {
+		statusDir = cfg.Options.AgentStatusDir
+	} else if envDir := os.Getenv("AGENT_STATUS_DIR"); envDir != "" {
+		statusDir = envDir
+	}
+
+	if statusDir == "" {
+		slog.Debug("Agent status reporting disabled (no directory configured)")
+		return nil
+	}
+
+	reporter, err := agentstatus.NewReporter(statusDir)
+	if err != nil {
+		return fmt.Errorf("creating status reporter: %w", err)
+	}
+
+	app.StatusReporter = reporter
+
+	// Set initial project info.
+	projectName := filepath.Base(cfg.WorkingDir())
+	reporter.SetProject(projectName, cfg.WorkingDir())
+
+	// Add cleanup on exit.
+	app.cleanupFuncs = append(app.cleanupFuncs, func() error {
+		slog.Debug("Closing agent status reporter")
+		return reporter.Close()
+	})
+
+	slog.Info("Agent status reporter initialized", "dir", statusDir)
 	return nil
 }
 

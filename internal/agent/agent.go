@@ -33,6 +33,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/agentstatus"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
@@ -63,6 +64,9 @@ var summaryPrompt []byte
 // Used to remove <think> tags from generated titles.
 var thinkTagRegex = regexp.MustCompile(`<think>.*?</think>`)
 
+// StatusReporter is the interface for agent status reporting.
+type StatusReporter = agentstatus.Reporter
+
 type SessionAgentCall struct {
 	SessionID        string
 	Prompt           string
@@ -81,6 +85,7 @@ type SessionAgent interface {
 	SetModels(large Model, small Model)
 	SetTools(tools []fantasy.AgentTool)
 	SetSystemPrompt(systemPrompt string)
+	SetStatusReporter(reporter *StatusReporter)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -110,6 +115,8 @@ type sessionAgent struct {
 	messages             message.Service
 	disableAutoSummarize bool
 	isYolo               bool
+
+	statusReporter *StatusReporter
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -369,6 +376,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			// TODO: implement
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
+			// Report tool start to status reporter.
+			if a.statusReporter != nil {
+				a.statusReporter.ToolStart(tc.ToolName)
+			}
+
 			toolCall := message.ToolCall{
 				ID:               tc.ToolCallID,
 				Name:             tc.ToolName,
@@ -380,6 +392,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
+			// Report tool end to status reporter.
+			if a.statusReporter != nil {
+				a.statusReporter.ToolEnd(result.ToolName)
+			}
+
 			toolResult := a.convertToToolResult(result)
 			_, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
 				Role: message.Tool,
@@ -421,6 +438,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				return sessionErr
 			}
 			currentSession = updatedSession
+
+			// Report token and cost usage to status reporter.
+			if a.statusReporter != nil {
+				usage := stepResult.Usage
+				a.statusReporter.UpdateTokens(
+					usage.InputTokens,
+					usage.OutputTokens,
+					usage.CacheReadTokens,
+					usage.CacheCreationTokens,
+				)
+				a.statusReporter.UpdateCost(updatedSession.Cost)
+			}
+
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		StopWhen: []fantasy.StopCondition{
@@ -1034,6 +1064,10 @@ func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 
 func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
 	a.systemPrompt.Set(systemPrompt)
+}
+
+func (a *sessionAgent) SetStatusReporter(reporter *StatusReporter) {
+	a.statusReporter = reporter
 }
 
 func (a *sessionAgent) Model() Model {
