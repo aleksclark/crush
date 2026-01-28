@@ -53,7 +53,9 @@ type (
 	ActionInitializeProject struct{}
 	// ActionOpenAgents is a message to open the agents dialog.
 	ActionOpenAgents struct{}
-	ActionSummarize  struct {
+	// ActionOpenMCPServers is a message to open the MCP servers dialog.
+	ActionOpenMCPServers struct{}
+	ActionSummarize      struct {
 		SessionID string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort has been selected.

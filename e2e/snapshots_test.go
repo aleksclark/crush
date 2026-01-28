@@ -45,8 +45,8 @@ func TestSnapshotVersion(t *testing.T) {
 	output := SnapshotText(snap)
 
 	// Check that the version matches the expected format.
-	// Pattern: v<semver>-<timestamp>-<commit>+<dirty>?
-	versionPattern := regexp.MustCompile(`crush version v\d+\.\d+\.\d+-\d+\.\d+-[a-f0-9]+(\+dirty)?`)
+	// Pattern: v<semver>-<timestamp>-<commit>+<dirty>? OR "devel" for development builds
+	versionPattern := regexp.MustCompile(`crush version (v\d+\.\d+\.\d+-\d+\.\d+-[a-f0-9]+(\+dirty)?|devel)`)
 	require.True(t, versionPattern.MatchString(output),
 		"Version output doesn't match expected format.\nGot: %s", strings.TrimSpace(output))
 

@@ -1165,6 +1165,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if cmd := m.openAgentsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ActionOpenMCPServers:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if cmd := m.openMCPServersDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	case dialog.ActionSelectModel:
 		if m.isAgentBusy() {
@@ -2690,6 +2695,23 @@ func (m *UI) openAgentsDialog() tea.Cmd {
 	}
 
 	m.dialog.OpenDialog(agentsDialog)
+	return nil
+}
+
+// openMCPServersDialog opens the MCP servers dialog.
+func (m *UI) openMCPServersDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.MCPServersID) {
+		// Bring to front.
+		m.dialog.BringToFront(dialog.MCPServersID)
+		return nil
+	}
+
+	mcpServersDialog, err := dialog.NewMCPServers(m.com)
+	if err != nil {
+		return uiutil.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(mcpServersDialog)
 	return nil
 }
 
