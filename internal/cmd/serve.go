@@ -9,6 +9,7 @@ import (
 
 	"charm.land/log/v2"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -41,11 +42,18 @@ crush serve --model claude-sonnet-4-20250514
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
 		defer cancel()
 
-		app, err := setupApp(cmd)
+		ws, cleanup, err := setupLocalWorkspace(cmd)
 		if err != nil {
 			return err
 		}
-		defer app.Shutdown()
+		defer cleanup()
+
+		// Extract the underlying app from the workspace.
+		appWs, ok := ws.(*workspace.AppWorkspace)
+		if !ok {
+			return fmt.Errorf("serve command requires a local workspace")
+		}
+		app := appWs.App()
 
 		if !app.Config().IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")

@@ -126,16 +126,16 @@ type ProviderConfig struct {
 }
 
 // ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
-func (pc *ProviderConfig) ToProvider() catwalk.Provider {
+func (c *ProviderConfig) ToProvider() catwalk.Provider {
 	// Convert config provider to provider.Provider format
 	provider := catwalk.Provider{
-		Name:   pc.Name,
-		ID:     catwalk.InferenceProvider(pc.ID),
-		Models: make([]catwalk.Model, len(pc.Models)),
+		Name:   c.Name,
+		ID:     catwalk.InferenceProvider(c.ID),
+		Models: make([]catwalk.Model, len(c.Models)),
 	}
 
 	// Convert models
-	for i, model := range pc.Models {
+	for i, model := range c.Models {
 		provider.Models[i] = catwalk.Model{
 			ID:                     model.ID,
 			Name:                   model.Name,
@@ -155,8 +155,8 @@ func (pc *ProviderConfig) ToProvider() catwalk.Provider {
 	return provider
 }
 
-func (pc *ProviderConfig) SetupGitHubCopilot() {
-	maps.Copy(pc.ExtraHeaders, copilot.Headers())
+func (c *ProviderConfig) SetupGitHubCopilot() {
+	maps.Copy(c.ExtraHeaders, copilot.Headers())
 }
 
 type MCPType string
@@ -214,8 +214,7 @@ func (c Completions) Limits() (depth, items int) {
 }
 
 type Permissions struct {
-	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"` // Tools that don't require permission prompts
-	SkipRequests bool     `json:"-"`                                                                                                                              // Automatically accept all permissions (YOLO mode)
+	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
 }
 
 type TrailerStyle string
@@ -260,6 +259,7 @@ type Options struct {
 	AutoLSP                   *bool                     `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
 	Progress                  *bool                     `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	DisableNotifications      bool                      `json:"disable_notifications,omitempty" jsonschema:"description=Disable desktop notifications,default=false"`
+	DisabledSkills            []string                  `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
 }
 
 type MCPs map[string]MCPConfig
@@ -467,6 +467,8 @@ func allToolNames() []string {
 	return []string{
 		"agent",
 		"bash",
+		"crush_info",
+		"crush_logs",
 		"job_output",
 		"job_kill",
 		"download",
@@ -555,10 +557,6 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	switch providerID {
 	case catwalk.InferenceProviderMiniMax, catwalk.InferenceProviderMiniMaxChina:
 		// NOTE: MiniMax has no good endpoint we can use to validate the API key.
-		// Let's at least check the pattern.
-		if !strings.HasPrefix(apiKey, "sk-") {
-			return fmt.Errorf("invalid API key format for provider %s", c.ID)
-		}
 		return nil
 	}
 
@@ -570,6 +568,8 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		switch providerID {
 		case catwalk.InferenceProviderOpenRouter:
 			testURL = baseURL + "/credits"
+		case catwalk.InferenceProviderOpenCodeGo:
+			testURL = strings.Replace(baseURL, "/go", "", 1) + "/models"
 		default:
 			testURL = baseURL + "/models"
 		}

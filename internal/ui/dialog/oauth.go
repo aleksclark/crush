@@ -332,7 +332,7 @@ func (m *OAuth) ShortHelp() []key.Binding {
 	case OAuthStateSuccess:
 		return []key.Binding{
 			key.NewBinding(
-				key.WithKeys("finish", "ctrl+y", "esc"),
+				key.WithKeys("enter", "ctrl+y", "esc"),
 				key.WithHelp("enter", "finish"),
 			),
 		}
@@ -350,32 +350,27 @@ func (d *OAuth) copyCode() tea.Cmd {
 	if d.State != OAuthStateDisplay {
 		return nil
 	}
-	return tea.Sequence(
-		tea.SetClipboard(d.userCode),
-		util.ReportInfo("Code copied to clipboard"),
-	)
+	return common.CopyToClipboard(d.userCode, "Code copied to clipboard")
 }
 
 func (d *OAuth) copyCodeAndOpenURL() tea.Cmd {
 	if d.State != OAuthStateDisplay {
 		return nil
 	}
-	return tea.Sequence(
-		tea.SetClipboard(d.userCode),
+	return common.CopyToClipboardWithCallback(
+		d.userCode,
+		"Code copied and URL opened",
 		func() tea.Msg {
 			if err := browser.OpenURL(d.verificationURL); err != nil {
 				return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
 			}
 			return nil
 		},
-		util.ReportInfo("Code copied and URL opened"),
 	)
 }
 
 func (m *OAuth) saveKeyAndContinue() Action {
-	store := m.com.Store()
-
-	err := store.SetProviderAPIKey(config.ScopeGlobal, string(m.provider.ID), m.token)
+	err := m.com.Workspace.SetProviderAPIKey(config.ScopeGlobal, string(m.provider.ID), m.token)
 	if err != nil {
 		return ActionCmd{util.ReportError(fmt.Errorf("failed to save API key: %w", err))}
 	}
