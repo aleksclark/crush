@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	_ "embed"
+	"html/template"
 	"log/slog"
 	"net/http"
 	"time"
@@ -11,8 +12,13 @@ import (
 	"github.com/charmbracelet/crush/plugin"
 )
 
-//go:embed web_search.md
-var webSearchToolDescription []byte
+//go:embed web_search.md.tpl
+var webSearchDescriptionTmpl []byte
+
+var webSearchDescriptionTpl = template.Must(
+	template.New("webSearchDescription").
+		Parse(string(webSearchDescriptionTmpl)),
+)
 
 // NewWebSearchTool creates a web search tool for sub-agents (no permissions needed).
 // If a search provider is given, it is used instead of the built-in DuckDuckGo scraper.
@@ -36,7 +42,7 @@ func NewWebSearchTool(client *http.Client, searchProvider ...plugin.SearchProvid
 
 	return fantasy.NewParallelAgentTool(
 		WebSearchToolName,
-		FirstLineDescription(webSearchToolDescription),
+		renderToolDescription(webSearchDescriptionTpl),
 		func(ctx context.Context, params WebSearchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Query == "" {
 				return fantasy.NewTextErrorResponse("query is required"), nil
@@ -67,7 +73,8 @@ func NewWebSearchTool(client *http.Client, searchProvider ...plugin.SearchProvid
 			}
 
 			return fantasy.NewTextResponse(formatSearchResults(results)), nil
-		})
+		},
+	)
 }
 
 // formatPluginSearchResults formats plugin.SearchResult into the same text format.
