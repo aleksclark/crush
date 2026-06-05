@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/lock"
 	crushlog "github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -299,8 +300,14 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	// workspace per process, so WithGlobalMirror keeps the package
 	// globals (which the TUI reads via skills.GetLatestStates) in sync
 	// with the manager.
-	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(localSkillsDiscoveryConfig(store))
-	skillsMgr := skills.NewManager(allSkills, activeSkills, skillStates, skills.WithGlobalMirror())
+	discoveryCfg := localSkillsDiscoveryConfig(store)
+	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(discoveryCfg)
+	skillsMgr := skills.NewManager(
+		allSkills, activeSkills, skillStates,
+		skills.WithGlobalMirror(),
+		skills.WithResolvedPaths(discoveryCfg.ResolvePaths()),
+		skills.WithWorkingDir(discoveryCfg.WorkingDir),
+	)
 
 	appInstance, err := app.New(ctx, conn, store, skillsMgr)
 	if err != nil {
@@ -334,6 +341,7 @@ func localSkillsDiscoveryConfig(store *config.ConfigStore) skills.DiscoveryConfi
 	return skills.DiscoveryConfig{
 		SkillsPaths:    paths,
 		DisabledSkills: disabled,
+		WorkingDir:     store.WorkingDir(),
 		Resolver:       resolver,
 	}
 }
@@ -467,7 +475,7 @@ func spawnAndWaitReady(cmd *cobra.Command, hostURL *url.URL) error {
 	if err != nil {
 		return err
 	}
-	release, err := acquireSpawnLock(filepath.Join(chDir, "start.lock"))
+	release, err := lock.File(cmd.Context(), filepath.Join(chDir, "start.lock"))
 	if err != nil {
 		// If the lock itself is unavailable, fall back to the
 		// unsynchronized path rather than blocking the user.

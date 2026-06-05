@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/plugin"
 )
 
@@ -66,6 +67,13 @@ func (w *AppWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) st
 
 func (w *AppWorkspace) ParseAgentToolSessionID(sessionID string) (string, string, bool) {
 	return w.app.Sessions.ParseAgentToolSessionID(sessionID)
+}
+
+// SetCurrentSession is a no-op in single-client local mode. The
+// presence concept only matters when multiple clients can share a
+// workspace via the HTTP server.
+func (w *AppWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
+	return nil
 }
 
 // -- Messages --
@@ -174,16 +182,16 @@ func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedMo
 
 // -- Permissions --
 
-func (w *AppWorkspace) PermissionGrant(perm permission.PermissionRequest) {
-	w.app.Permissions.Grant(perm)
+func (w *AppWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
+	return w.app.Permissions.Grant(perm)
 }
 
-func (w *AppWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) {
-	w.app.Permissions.GrantPersistent(perm)
+func (w *AppWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
+	return w.app.Permissions.GrantPersistent(perm)
 }
 
-func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) {
-	w.app.Permissions.Deny(perm)
+func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
+	return w.app.Permissions.Deny(perm)
 }
 
 func (w *AppWorkspace) PermissionSkipRequests() bool {
@@ -303,6 +311,16 @@ func (w *AppWorkspace) MarkProjectInitialized() error {
 
 func (w *AppWorkspace) InitializePrompt() (string, error) {
 	return agent.InitializePrompt(w.store)
+}
+
+func (w *AppWorkspace) ListSkills(_ context.Context) ([]skills.CatalogEntry, error) {
+	mgr := w.app.Skills
+	return skills.Catalog(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir()), nil
+}
+
+func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {
+	mgr := w.app.Skills
+	return skills.ReadContent(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir(), skillID)
 }
 
 // -- MCP operations --

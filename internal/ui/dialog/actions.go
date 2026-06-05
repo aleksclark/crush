@@ -46,14 +46,17 @@ type ActionSelectModel struct {
 
 // Messages for commands
 type (
-	ActionNewSession                  struct{}
-	ActionToggleHelp                  struct{}
-	ActionToggleCompactMode           struct{}
-	ActionToggleThinking              struct{}
-	ActionTogglePills                 struct{}
-	ActionExternalEditor              struct{}
-	ActionToggleYoloMode              struct{}
-	ActionToggleNotifications         struct{}
+	ActionNewSession              struct{}
+	ActionToggleHelp              struct{}
+	ActionToggleCompactMode       struct{}
+	ActionToggleThinking          struct{}
+	ActionTogglePills             struct{}
+	ActionExternalEditor          struct{}
+	ActionToggleYoloMode          struct{}
+	ActionToggleNotifications     struct{}
+	ActionSelectNotificationStyle struct {
+		Style string
+	}
 	ActionToggleTransparentBackground struct{}
 	ActionInitializeProject           struct{}
 	ActionSummarize                   struct {
@@ -74,6 +77,12 @@ type (
 		Arguments []commands.Argument
 		Args      map[string]string // Actual argument values
 		Skill     *skills.Skill     // Set when this is a skill command
+	}
+	// ActionAttachSkill is sent when a skill is selected from the commands
+	// dialog to be attached to the conversation as a markdown attachment.
+	ActionAttachSkill struct {
+		ID   string
+		Name string
 	}
 	// ActionRunMCPPrompt is a message to run a custom command.
 	ActionRunMCPPrompt struct {

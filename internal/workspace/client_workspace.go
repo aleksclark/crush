@@ -64,7 +64,7 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 // refreshWorkspace re-fetches the workspace from the server, updating
 // the cached snapshot. Called after config-mutating operations.
 func (w *ClientWorkspace) refreshWorkspace() {
-	updated, err := w.client.GetWorkspace(context.Background(), w.ws.ID)
+	updated, err := w.client.GetWorkspace(context.Background(), w.workspaceID())
 	if err != nil {
 		slog.Error("Failed to refresh workspace", "error", err)
 		return
@@ -143,6 +143,14 @@ func (w *ClientWorkspace) ParseAgentToolSessionID(sessionID string) (string, str
 	return parts[0], parts[1], true
 }
 
+// SetCurrentSession reports the session this client is currently
+// viewing to the server. Empty sessionID clears the entry. Errors
+// are propagated to the caller; the TUI logs and ignores them since
+// the presence record is a hint, not correctness-critical state.
+func (w *ClientWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
+	return w.client.SetCurrentSession(ctx, w.workspaceID(), sessionID)
+}
+
 // -- Messages --
 
 func (w *ClientWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
@@ -172,7 +180,11 @@ func (w *ClientWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Me
 // -- Agent --
 
 func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {
-	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, prompt, attachments...)
+	// The interactive TUI does not consume notify.RunComplete for
+	// completion detection (it observes message events directly),
+	// so passing an empty RunID is correct here: it skips the
+	// correlator stamping path without functional consequences.
+	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", prompt, attachments...)
 }
 
 func (w *ClientWorkspace) AgentCancel(sessionID string) {
@@ -256,24 +268,8 @@ func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) config.Selecte
 
 // -- Permissions --
 
-func (w *ClientWorkspace) PermissionGrant(perm permission.PermissionRequest) {
-	_ = w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
-		Permission: proto.PermissionRequest{
-			ID:          perm.ID,
-			SessionID:   perm.SessionID,
-			ToolCallID:  perm.ToolCallID,
-			ToolName:    perm.ToolName,
-			Description: perm.Description,
-			Action:      perm.Action,
-			Path:        perm.Path,
-			Params:      perm.Params,
-		},
-		Action: proto.PermissionAllowForSession,
-	})
-}
-
-func (w *ClientWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) {
-	_ = w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
+func (w *ClientWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
+	resolved, _ := w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
 		Permission: proto.PermissionRequest{
 			ID:          perm.ID,
 			SessionID:   perm.SessionID,
@@ -286,10 +282,28 @@ func (w *ClientWorkspace) PermissionGrantPersistent(perm permission.PermissionRe
 		},
 		Action: proto.PermissionAllow,
 	})
+	return resolved
 }
 
-func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) {
-	_ = w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
+func (w *ClientWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
+	resolved, _ := w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
+		Permission: proto.PermissionRequest{
+			ID:          perm.ID,
+			SessionID:   perm.SessionID,
+			ToolCallID:  perm.ToolCallID,
+			ToolName:    perm.ToolName,
+			Description: perm.Description,
+			Action:      perm.Action,
+			Path:        perm.Path,
+			Params:      perm.Params,
+		},
+		Action: proto.PermissionAllowForSession,
+	})
+	return resolved
+}
+
+func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
+	resolved, _ := w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
 		Permission: proto.PermissionRequest{
 			ID:          perm.ID,
 			SessionID:   perm.SessionID,
@@ -302,6 +316,7 @@ func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) {
 		},
 		Action: proto.PermissionDeny,
 	})
+	return resolved
 }
 
 func (w *ClientWorkspace) PermissionSkipRequests() bool {
@@ -484,6 +499,38 @@ func (w *ClientWorkspace) InitializePrompt() (string, error) {
 	return w.client.GetInitializePrompt(context.Background(), w.workspaceID())
 }
 
+func (w *ClientWorkspace) ListSkills(ctx context.Context) ([]skills.CatalogEntry, error) {
+	entries, err := w.client.ListSkills(ctx, w.workspaceID())
+	if err != nil {
+		return nil, err
+	}
+	result := make([]skills.CatalogEntry, len(entries))
+	for i, entry := range entries {
+		result[i] = skills.CatalogEntry{
+			ID:            entry.ID,
+			Name:          entry.Name,
+			Description:   entry.Description,
+			Label:         entry.Label,
+			Source:        skills.SourceType(entry.Source),
+			UserInvocable: entry.UserInvocable,
+		}
+	}
+	return result, nil
+}
+
+func (w *ClientWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {
+	resp, err := w.client.ReadSkill(ctx, w.workspaceID(), skillID)
+	if err != nil {
+		return nil, skills.SkillReadResult{}, err
+	}
+	return resp.Content, skills.SkillReadResult{
+		Name:        resp.Result.Name,
+		Description: resp.Result.Description,
+		Source:      skills.SourceType(resp.Result.Source),
+		Builtin:     resp.Result.Builtin,
+	}, nil
+}
+
 // -- MCP operations --
 
 func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
@@ -563,10 +610,22 @@ func (w *ClientWorkspace) Subscribe(program *tea.Program) {
 		return
 	}
 
+	w.consumeEvents(evc, program.Send)
+}
+
+// consumeEvents drives the workspace event loop. It is split out from
+// Subscribe so tests can drive it without a real *tea.Program.
+// ConfigChanged events trigger a workspace refresh; all other events
+// are translated into domain types and forwarded to send.
+func (w *ClientWorkspace) consumeEvents(evc <-chan any, send func(tea.Msg)) {
 	for ev := range evc {
+		if _, ok := ev.(pubsub.Event[proto.ConfigChanged]); ok {
+			w.refreshWorkspace()
+			continue
+		}
 		translated := w.translateEvent(ev)
-		if translated != nil {
-			program.Send(translated)
+		if translated != nil && send != nil {
+			send(translated)
 		}
 	}
 }
@@ -651,12 +710,35 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			Payload: protoToFile(e.Payload),
 		}
 	case pubsub.Event[proto.AgentEvent]:
+		n := notify.Notification{
+			SessionID:    e.Payload.SessionID,
+			SessionTitle: e.Payload.SessionTitle,
+			RunID:        e.Payload.RunID,
+			Type:         notify.Type(e.Payload.Type),
+		}
+		if e.Payload.Error != nil {
+			n.Message = e.Payload.Error.Error()
+		}
 		return pubsub.Event[notify.Notification]{
+			Type:    e.Type,
+			Payload: n,
+		}
+	case pubsub.Event[proto.RunComplete]:
+		// Translate the wire-level proto.RunComplete back into the
+		// agent's domain notify.RunComplete. Without this case the
+		// default branch below warns on every run completion in the
+		// server-mode TUI, even though the TUI itself doesn't act
+		// on RunComplete — converting silently keeps the workspace
+		// event bridge symmetric with the server-side wrapEvent.
+		return pubsub.Event[notify.RunComplete]{
 			Type: e.Type,
-			Payload: notify.Notification{
-				SessionID:    e.Payload.SessionID,
-				SessionTitle: e.Payload.SessionTitle,
-				Type:         notify.Type(e.Payload.Type),
+			Payload: notify.RunComplete{
+				SessionID: e.Payload.SessionID,
+				RunID:     e.Payload.RunID,
+				MessageID: e.Payload.MessageID,
+				Text:      e.Payload.Text,
+				Error:     e.Payload.Error,
+				Cancelled: e.Payload.Cancelled,
 			},
 		}
 	case pubsub.Event[proto.SkillsEvent]:
@@ -689,6 +771,13 @@ func protoToMCPEventType(t proto.MCPEventType) mcp.EventType {
 	}
 }
 
+// protoToSession converts a wire-level proto.Session into the domain
+// session.Session. Fields that exist only on the wire (computed-on-read
+// signals like IsBusy, and any future presence counters) are
+// intentionally dropped here: session.Session models persisted state,
+// not transient runtime signals. UI features that need those signals
+// should either extend session.Session or read them from the proto
+// payload directly before this conversion runs.
 func protoToSession(s proto.Session) session.Session {
 	return session.Session{
 		ID:               s.ID,
