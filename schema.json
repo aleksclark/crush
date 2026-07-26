@@ -294,6 +294,23 @@
           },
           "type": "object",
           "description": "HTTP headers for HTTP/SSE MCP servers"
+        },
+        "oauth": {
+          "type": "boolean",
+          "description": "Enable OAuth 2.1 authorization flow for this MCP server (HTTP transport only)",
+          "default": false
+        },
+        "oauth_client_id": {
+          "type": "string",
+          "description": "Pre-registered OAuth client ID for servers without dynamic client registration"
+        },
+        "oauth_client_secret": {
+          "type": "string",
+          "description": "Pre-registered OAuth client secret paired with oauth_client_id"
+        },
+        "oauth_callback_port": {
+          "type": "integer",
+          "description": "Fixed localhost port for the OAuth callback"
         }
       },
       "additionalProperties": false,
@@ -387,6 +404,27 @@
         },
         "provider_options": {
           "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "OAuthClient": {
+      "properties": {
+        "client_id": {
+          "type": "string"
+        },
+        "client_secret": {
+          "type": "string"
+        },
+        "auth_url": {
+          "type": "string"
+        },
+        "token_url": {
+          "type": "string"
+        },
+        "auth_style": {
+          "type": "integer"
         }
       },
       "additionalProperties": false,
@@ -591,6 +629,7 @@
             "google-vertex",
             "hyper",
             "litellm",
+            "llamacpp",
             "lmstudio",
             "ollama",
             "omlx"
@@ -755,6 +794,16 @@
           "type": "boolean",
           "description": "Enable transparent background for the TUI interface",
           "default": false
+        },
+        "scrollbar": {
+          "type": "string",
+          "enum": [
+            "default",
+            "always",
+            "never"
+          ],
+          "description": "Chat scrollbar visibility",
+          "default": "default"
         }
       },
       "additionalProperties": false,
@@ -773,16 +822,28 @@
         },
         "expires_at": {
           "type": "integer"
+        },
+        "client": {
+          "$ref": "#/$defs/OAuthClient"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
         "access_token",
-        "refresh_token",
         "expires_in",
         "expires_at"
       ]
+    },
+    "ToolGlob": {
+      "properties": {
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout for the glob tool call"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
     },
     "ToolGrep": {
       "properties": {
@@ -823,6 +884,9 @@
         },
         "grep": {
           "$ref": "#/$defs/ToolGrep"
+        },
+        "glob": {
+          "$ref": "#/$defs/ToolGlob"
         }
       },
       "additionalProperties": false,

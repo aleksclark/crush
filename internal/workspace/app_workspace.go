@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
@@ -72,10 +73,12 @@ func (w *AppWorkspace) ParseAgentToolSessionID(sessionID string) (string, string
 	return w.app.Sessions.ParseAgentToolSessionID(sessionID)
 }
 
-// SetCurrentSession is a no-op in single-client local mode. The
-// presence concept only matters when multiple clients can share a
-// workspace via the HTTP server.
+// SetCurrentSession reports the active session to herdr so the pane
+// can persist a resumable reference. Multi-client presence tracking
+// is irrelevant in single-client local mode, but herdr still needs
+// to know which session is live to support agent resume.
 func (w *AppWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
+	w.app.ReportCurrentSession(sessionID)
 	return nil
 }
 
@@ -113,15 +116,7 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 	var persist shell.PersistFunc
 	if sessionID != "" {
 		persist = func(cmd, output string, exitCode int) error {
-			_, err := w.app.Messages.Create(ctx, sessionID, message.CreateMessageParams{
-				Role: message.User,
-				Parts: []message.ContentPart{message.ShellCommand{
-					Command:  cmd,
-					Output:   output,
-					ExitCode: exitCode,
-				}},
-			})
-			return err
+			return shell.PersistOutput(ctx, w.app.Messages, sessionID, cmd, output, exitCode)
 		}
 	}
 
@@ -198,6 +193,13 @@ func (w *AppWorkspace) AgentIsReady() bool {
 	return w.app.AgentCoordinator != nil
 }
 
+func (w *AppWorkspace) AgentReadyErr() error {
+	if w.app.AgentCoordinator == nil {
+		return ErrAgentNotInitialized
+	}
+	return nil
+}
+
 func (w *AppWorkspace) AgentQueuedPrompts(sessionID string) int {
 	if w.app.AgentCoordinator == nil {
 		return 0
@@ -233,6 +235,10 @@ func (w *AppWorkspace) InitCoderAgent(ctx context.Context) error {
 	return w.app.InitCoderAgent(ctx)
 }
 
+func (w *AppWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
+	return w.app.InitCoderAgentNonInteractive(ctx)
+}
+
 func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
 	return w.app.GetDefaultSmallModel(providerID)
 }
@@ -257,6 +263,16 @@ func (w *AppWorkspace) PermissionSkipRequests() bool {
 
 func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
 	w.app.Permissions.SetSkipRequests(skip)
+}
+
+// -- Questions --
+
+func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {
+	return w.app.Questions.Answer(responses)
+}
+
+func (w *AppWorkspace) QuestionCancel() bool {
+	return w.app.Questions.Cancel()
 }
 
 // -- FileTracker --
@@ -337,7 +353,11 @@ func (w *AppWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
 }
 
 func (w *AppWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
-	return w.store.SetProviderAPIKey(scope, providerID, apiKey)
+	if err := w.store.SetProviderAPIKey(scope, providerID, apiKey); err != nil {
+		return err
+	}
+	w.store.SignalAuthComplete(providerID)
+	return nil
 }
 
 func (w *AppWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
@@ -415,6 +435,10 @@ func (w *AppWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([
 	return result, nil
 }
 
+func (w *AppWorkspace) ListMCPPrompts(context.Context) ([]commands.MCPPrompt, error) {
+	return commands.LoadMCPPrompts()
+}
+
 func (w *AppWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
 	return commands.GetMCPPrompt(w.store, clientID, promptID, args)
 }
@@ -427,13 +451,13 @@ func (w *AppWorkspace) EnableDockerMCP(ctx context.Context) error {
 
 	if err := mcptools.InitializeSingle(ctx, config.DockerMCPName, w.store); err != nil {
 		disableErr := mcptools.DisableSingle(w.store, config.DockerMCPName)
-		delete(w.store.Config().MCP, config.DockerMCPName)
+		w.store.RemoveDockerMCPInMemory()
 		return fmt.Errorf("failed to start docker MCP: %w", errors.Join(err, disableErr))
 	}
 
 	if err := w.store.PersistDockerMCPConfig(mcpConfig); err != nil {
 		disableErr := mcptools.DisableSingle(w.store, config.DockerMCPName)
-		delete(w.store.Config().MCP, config.DockerMCPName)
+		w.store.RemoveDockerMCPInMemory()
 		return fmt.Errorf("docker MCP started but failed to persist configuration: %w", errors.Join(err, disableErr))
 	}
 
@@ -445,6 +469,18 @@ func (w *AppWorkspace) DisableDockerMCP() error {
 		return fmt.Errorf("failed to disable docker MCP: %w", err)
 	}
 	return w.store.DisableDockerMCP()
+}
+
+func (w *AppWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
+	return mcptools.AuthenticateMCP(ctx, w.store, name)
+}
+
+func (w *AppWorkspace) MCPPendingAuth() []mcptools.PendingAuthServer {
+	return mcptools.PendingAuthMCPs(w.store)
+}
+
+func (w *AppWorkspace) MCPAuthURL(name string) string {
+	return mcptools.MCPAuthURL(name)
 }
 
 // -- Lifecycle --
