@@ -777,15 +777,49 @@ func restartIfStale(cmd *cobra.Command, hostURL *url.URL) (restarted bool, err e
 	// the same safe outcome: keep using the running server. The wrapped
 	// error says which it was.
 	if err := c.ShutdownServerIfIdle(cmd.Context()); err != nil {
-		slog.Warn("Server version differs but it will not stand down; reusing it",
-			append(versionFields, "error", err)...)
-		return false, nil
+		if !errors.Is(err, client.ErrUnsupported) {
+			slog.Warn("Server version differs but it will not stand down; reusing it",
+				append(versionFields, "error", err)...)
+			return false, nil
+		}
+		// The server predates shutdown_if_idle. Fall back to the
+		// unconditional command, but only after verifying it is idle.
+		if !shutdownLegacyStaleServer(cmd.Context(), c, versionFields) {
+			return false, nil
+		}
 	}
 	slog.Info("Stale server accepted shutdown, restarting", versionFields...)
 	if err := awaitSocketGone(cmd.Context(), hostURL); err != nil {
 		return true, err
 	}
 	return true, nil
+}
+
+// shutdownLegacyStaleServer handles a stale server too old to understand the
+// idle-checked shutdown. That server's only "shutdown" command is
+// unconditional and would take live sessions down, so it is used only after
+// listing workspaces confirms the server is idle. It reports whether the
+// server accepted the shutdown; every other outcome (unreachable, busy, or a
+// refused shutdown) is logged and reported as false so the caller reuses the
+// running server.
+func shutdownLegacyStaleServer(ctx context.Context, c *client.Client, versionFields []any) bool {
+	workspaces, err := c.ListWorkspaces(ctx)
+	if err != nil {
+		slog.Warn("Server version differs but it will not stand down; reusing it",
+			append(versionFields, "list_error", err)...)
+		return false
+	}
+	if len(workspaces) > 0 {
+		slog.Warn("Server version differs and has active workspaces; reusing it",
+			append(versionFields, "workspaces", len(workspaces))...)
+		return false
+	}
+	if err := c.ShutdownServer(ctx); err != nil {
+		slog.Warn("Server version differs but it will not stand down; reusing it",
+			append(versionFields, "error", err)...)
+		return false
+	}
+	return true
 }
 
 // awaitSocketGone gives a server that has committed to exiting a moment to
