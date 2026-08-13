@@ -391,6 +391,65 @@ func effectiveReasoningEffort(model Model) string {
 	return ""
 }
 
+// usesAnthropicAdaptiveThinking reports whether a Claude model ID must use
+// thinking.type=adaptive (and output_config.effort) instead of the legacy
+// thinking.type=enabled + budget_tokens shape.
+//
+// Fantasy only auto-upgrades claude-opus-4-N for N>=7 and mythos-preview.
+// Newer named models (claude-opus-5, claude-fable-5, claude-sonnet-5, …)
+// still get the legacy shape unless callers send effort explicitly.
+func usesAnthropicAdaptiveThinking(modelID string) bool {
+	m := strings.ToLower(strings.TrimSpace(modelID))
+	if m == "" || !strings.Contains(m, "claude") {
+		return false
+	}
+	// Pre-adaptive Claude families that still require budget_tokens.
+	// Anything not listed (4.6+, 5.x, fable/mythos, future) uses adaptive.
+	legacy := []string{
+		"claude-3-", "claude-3.",
+		"claude-opus-4-0", "claude-opus-4.0", "claude-opus-4-1", "claude-opus-4.1",
+		"claude-sonnet-4-0", "claude-sonnet-4.0",
+		"claude-opus-4-2025", "claude-sonnet-4-2025",
+		"claude-opus-4-5", "claude-opus-4.5",
+		"claude-sonnet-4-5", "claude-sonnet-4.5",
+		"claude-haiku-4-5", "claude-haiku-4.5",
+	}
+	for _, sub := range legacy {
+		if strings.Contains(m, sub) {
+			return false
+		}
+	}
+	// Bare "claude-opus-4" / "claude-sonnet-4" (no minor) are original GA.
+	if strings.Contains(m, "claude-opus-4") && !strings.Contains(m, "claude-opus-4-") && !strings.Contains(m, "claude-opus-4.") {
+		return false
+	}
+	if strings.Contains(m, "claude-sonnet-4") && !strings.Contains(m, "claude-sonnet-4-") && !strings.Contains(m, "claude-sonnet-4.") {
+		return false
+	}
+	return true
+}
+
+// defaultAnthropicAdaptiveEffort picks an effort level when the user toggled
+// thinking on without selecting a reasoning level.
+//
+// Prefer an explicit user/config choice. When none is set, prefer "high" for
+// coding work rather than the first advertised level (often "low").
+func defaultAnthropicAdaptiveEffort(model Model) string {
+	if effort := model.ModelCfg.ReasoningEffort; effort != "" && slices.Contains(model.CatwalkCfg.ReasoningLevels, effort) {
+		return effort
+	}
+	if effort := model.CatwalkCfg.DefaultReasoningEffort; effort != "" && slices.Contains(model.CatwalkCfg.ReasoningLevels, effort) {
+		return effort
+	}
+	if slices.Contains(model.CatwalkCfg.ReasoningLevels, "high") {
+		return "high"
+	}
+	if len(model.CatwalkCfg.ReasoningLevels) > 0 {
+		return model.CatwalkCfg.ReasoningLevels[0]
+	}
+	return "high"
+}
+
 func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {
 	options := fantasy.ProviderOptions{}
 
@@ -488,10 +547,23 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			mergedOptions["extra_body"] = extraBody
 
 		default:
+			// Modern Claude models (Opus 4.7+, Opus 5, Fable/Mythos, Sonnet 5)
+			// reject thinking.type=enabled and require adaptive thinking +
+			// output_config.effort. Fantasy only auto-upgrades a narrow set of
+			// opus-4-N IDs, so bare IDs like claude-opus-5 still get the legacy
+			// enabled/budget shape unless we send effort here.
+			adaptive := usesAnthropicAdaptiveThinking(model.CatwalkCfg.ID)
+			wantThinking := model.ModelCfg.Think || shouldSetEffort
 			switch {
+			case !hasEffort && wantThinking && adaptive:
+				mergedOptions["effort"] = defaultAnthropicAdaptiveEffort(model)
+				if _, hasDisplay := mergedOptions["thinking_display"]; !hasDisplay {
+					mergedOptions["thinking_display"] = "summarized"
+				}
 			case !hasEffort && shouldSetEffort:
 				mergedOptions["effort"] = reasoningEffort
 			case !hasThink && model.ModelCfg.Think:
+				// Legacy Claude families still use budget-based extended thinking.
 				mergedOptions["thinking"] = map[string]any{"budget_tokens": 2000}
 			}
 		}

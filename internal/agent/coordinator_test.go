@@ -551,6 +551,91 @@ func TestIsUnauthorized(t *testing.T) {
 	})
 }
 
+func TestUsesAnthropicAdaptiveThinking(t *testing.T) {
+	cases := []struct {
+		model string
+		want  bool
+	}{
+		{"claude-opus-5", true},
+		{"claude-fable-5", true},
+		{"claude-sonnet-5", true},
+		{"claude-opus-4-8", true},
+		{"claude-opus-4-7", true},
+		{"claude-opus-4-6", true},
+		{"claude-sonnet-4-6", true},
+		{"claude-opus-4-5", false},
+		{"claude-sonnet-4-5", false},
+		{"claude-haiku-4-5", false},
+		{"claude-3-5-sonnet", false},
+		{"claude-opus-4", false},
+		{"claude-sonnet-4", false},
+		{"claude-opus-4-20250514", false},
+		{"minimax-m2", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			assert.Equal(t, tc.want, usesAnthropicAdaptiveThinking(tc.model), tc.model)
+		})
+	}
+}
+
+func TestGetProviderOptionsAnthropicAdaptiveThinkingForOpus5(t *testing.T) {
+	model := Model{
+		CatwalkCfg: catwalk.Model{
+			ID:              "claude-opus-5",
+			CanReason:       true,
+			ReasoningLevels: []string{"low", "medium", "high", "xhigh", "max"},
+		},
+		ModelCfg: config.SelectedModel{
+			Provider: "Frontier (Anthropic)",
+			Think:    true,
+		},
+	}
+	providerCfg := config.ProviderConfig{
+		ID:   "Frontier (Anthropic)",
+		Type: anthropic.Name,
+	}
+
+	opts := getProviderOptions(model, providerCfg)
+	raw, ok := opts[anthropic.Name]
+	require.True(t, ok)
+	parsed, ok := raw.(*anthropic.ProviderOptions)
+	require.True(t, ok)
+	require.NotNil(t, parsed.Effort)
+	assert.Equal(t, anthropic.EffortHigh, *parsed.Effort)
+	// Must NOT send the legacy budget thinking shape for Opus 5.
+	assert.Nil(t, parsed.Thinking)
+	require.NotNil(t, parsed.ThinkingDisplay)
+	assert.Equal(t, anthropic.ThinkingDisplaySummarized, *parsed.ThinkingDisplay)
+}
+
+func TestGetProviderOptionsAnthropicLegacyBudgetThinking(t *testing.T) {
+	model := Model{
+		CatwalkCfg: catwalk.Model{
+			ID:        "claude-sonnet-4-5",
+			CanReason: true,
+		},
+		ModelCfg: config.SelectedModel{
+			Provider: "anthropic",
+			Think:    true,
+		},
+	}
+	providerCfg := config.ProviderConfig{
+		ID:   "anthropic",
+		Type: anthropic.Name,
+	}
+
+	opts := getProviderOptions(model, providerCfg)
+	raw, ok := opts[anthropic.Name]
+	require.True(t, ok)
+	parsed, ok := raw.(*anthropic.ProviderOptions)
+	require.True(t, ok)
+	require.NotNil(t, parsed.Thinking)
+	assert.Equal(t, int64(2000), parsed.Thinking.BudgetTokens)
+	assert.Nil(t, parsed.Effort)
+}
+
 func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	model := Model{
 		CatwalkCfg: catwalk.Model{
