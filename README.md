@@ -236,6 +236,30 @@ Also note that Crush can support nearly any provider, including
 [Local Models](#local-models). For more info see
 [Custom Providers](#custom-providers) below.
 
+## Client/server authentication
+
+Client/server mode can protect the Crush HTTP API with a bearer token. Set the
+same `CRUSH_SERVER_TOKEN` value for the server and every client:
+
+```bash
+# Server.
+CRUSH_SERVER_TOKEN="$(cat /secure/path/crush.token)" \
+  crush server --host tcp://127.0.0.1:8080
+
+# Client.
+CRUSH_CLIENT_SERVER=1 CRUSH_SERVER_TOKEN="$(cat /secure/path/crush.token)" \
+  crush --host tcp://127.0.0.1:8080
+```
+
+`--server-token` is also available, but the environment variable avoids placing
+the token in process arguments. When the server token is unset, the API remains
+unauthenticated for backward compatibility.
+
+> [!WARNING]
+> Crush TCP client/server transport is unencrypted. Use a trusted local network,
+> an encrypted tunnel, or a TLS-terminating proxy when crossing machine or trust
+> boundaries.
+
 ### By the Way
 
 Is there a provider you’d like to see in Crush? Is there an existing model that needs an update?

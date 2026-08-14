@@ -52,13 +52,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var clientHost string
+var (
+	clientHost  string
+	serverToken string
+)
 
 func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
 	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom crush data directory")
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 	rootCmd.PersistentFlags().StringVarP(&clientHost, "host", "H", server.DefaultHost(), "Connect to a specific crush server host (for advanced users)")
+	rootCmd.PersistentFlags().StringVar(&serverToken, "server-token", "", "Bearer token for authenticating to the Crush server (or CRUSH_SERVER_TOKEN)")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
 	rootCmd.Flags().Bool("list-plugins", false, "List registered plugins and exit")
@@ -306,6 +310,31 @@ func useClientServer() bool {
 	return v
 }
 
+func configuredServerToken(flagToken string) string {
+	if flagToken != "" {
+		return flagToken
+	}
+	return os.Getenv("CRUSH_SERVER_TOKEN")
+}
+
+func consumeServerToken(flagToken string) string {
+	token := configuredServerToken(flagToken)
+	_ = os.Unsetenv("CRUSH_SERVER_TOKEN")
+	return token
+}
+
+func withoutServerToken(env []string) []string {
+	filtered := make([]string, 0, len(env))
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(key, "CRUSH_SERVER_TOKEN") {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
+}
+
 // setupWorkspaceWithProgressBar wraps setupWorkspace with an optional
 // terminal progress bar shown during initialization.
 func setupWorkspaceWithProgressBar(cmd *cobra.Command) (workspace.Workspace, func(), error) {
@@ -460,7 +489,8 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 		return nil, nil, nil, fmt.Errorf("invalid host URL: %v", err)
 	}
 
-	if err := ensureServer(cmd, hostURL); err != nil {
+	authToken := configuredServerToken(serverToken)
+	if err := ensureServer(cmd, hostURL, authToken); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -474,7 +504,7 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 		return nil, nil, nil, err
 	}
 
-	c, err := client.NewClient(cwd, hostURL.Scheme, hostURL.Host)
+	c, err := client.NewClient(cwd, hostURL.Scheme, hostURL.Host, client.WithAuthToken(authToken))
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -486,11 +516,11 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 		YOLO:     yolo,
 		Channels: channels,
 		Version:  version.Version,
-		Env:      os.Environ(),
+		Env:      withoutServerToken(os.Environ()),
 	}
 
 	ws, err := createWorkspaceOnLiveServer(cmd.Context(), c, wsReq, func() error {
-		return replaceExitingServer(cmd, hostURL)
+		return replaceExitingServer(cmd, hostURL, authToken)
 	})
 	if err != nil {
 		return nil, nil, nil, err
@@ -552,13 +582,13 @@ func createWorkspaceOnLiveServer(
 
 // replaceExitingServer waits out the socket of a server that has committed
 // to exiting, then brings up a fresh one.
-func replaceExitingServer(cmd *cobra.Command, hostURL *url.URL) error {
+func replaceExitingServer(cmd *cobra.Command, hostURL *url.URL, authToken string) error {
 	if hostURL.Scheme == "unix" {
 		if err := awaitSocketGone(cmd.Context(), hostURL); err != nil {
 			return err
 		}
 	}
-	if err := spawnAndWaitReady(cmd, hostURL); err != nil {
+	if err := spawnAndWaitReady(cmd, hostURL, authToken); err != nil {
 		return fmt.Errorf("failed to initialize crush server: %v", err)
 	}
 	return nil
@@ -568,7 +598,7 @@ func replaceExitingServer(cmd *cobra.Command, hostURL *url.URL) error {
 // exist. When the socket exists, it verifies that the running server
 // version matches the client; on mismatch it shuts down the old server
 // and starts a fresh one.
-func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
+func ensureServer(cmd *cobra.Command, hostURL *url.URL, authToken string) error {
 	// Initialize the persistent log here so stale-socket diagnostics
 	// emitted before connectToServer runs are captured in the per-host
 	// server log file. crushlog.Setup uses sync.Once internally, so the
@@ -605,8 +635,11 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 					break
 				}
 			}
-			restarted, err := restartIfStale(cmd, hostURL)
+			restarted, err := restartIfStale(cmd, hostURL, authToken)
 			if err != nil {
+				if errors.Is(err, client.ErrUnauthorized) {
+					return fmt.Errorf("server authentication failed: %w", err)
+				}
 				slog.Warn("Failed to check server version", "error", err)
 			}
 			needsStart = restarted || err != nil
@@ -622,13 +655,13 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 		}
 
 		if needsStart {
-			if err := spawnAndWaitReady(cmd, hostURL); err != nil {
+			if err := spawnAndWaitReady(cmd, hostURL, authToken); err != nil {
 				return fmt.Errorf("failed to initialize crush server: %v", err)
 			}
 			return nil
 		}
 
-		if err := waitForServerReady(cmd.Context(), hostURL); err != nil {
+		if err := waitForServerReady(cmd.Context(), hostURL, authToken); err != nil {
 			return fmt.Errorf("failed to initialize crush server: %v", err)
 		}
 	}
@@ -645,7 +678,7 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 // just use the now-running server. The lock is held only for the
 // duration of "spawn + readiness probe" and released before the caller
 // resumes its normal lifetime.
-func spawnAndWaitReady(cmd *cobra.Command, hostURL *url.URL) error {
+func spawnAndWaitReady(cmd *cobra.Command, hostURL *url.URL, authToken string) error {
 	chDir, err := perHostServerDir(hostURL)
 	if err != nil {
 		return err
@@ -655,10 +688,10 @@ func spawnAndWaitReady(cmd *cobra.Command, hostURL *url.URL) error {
 		// If the lock itself is unavailable, fall back to the
 		// unsynchronized path rather than blocking the user.
 		slog.Warn("Failed to acquire spawn lock, proceeding without single-flight", "error", err)
-		if err := startDetachedServer(cmd, hostURL); err != nil {
+		if err := startDetachedServer(cmd, hostURL, authToken); err != nil {
 			return err
 		}
-		return waitForServerReady(cmd.Context(), hostURL)
+		return waitForServerReady(cmd.Context(), hostURL, authToken)
 	}
 	defer release()
 
@@ -666,26 +699,26 @@ func spawnAndWaitReady(cmd *cobra.Command, hostURL *url.URL) error {
 	// waiting on the lock; if the server is already responsive, skip
 	// the spawn entirely.
 	probeCtx, cancel := context.WithTimeout(cmd.Context(), 200*time.Millisecond)
-	probeErr := quickHealthProbe(probeCtx, hostURL)
+	probeErr := quickHealthProbe(probeCtx, hostURL, authToken)
 	cancel()
 	if probeErr == nil {
 		return nil
 	}
 
-	if err := startDetachedServer(cmd, hostURL); err != nil {
+	if err := startDetachedServer(cmd, hostURL, authToken); err != nil {
 		return err
 	}
-	return waitForServerReady(cmd.Context(), hostURL)
+	return waitForServerReady(cmd.Context(), hostURL, authToken)
 }
 
 // quickHealthProbe issues a single readiness request with the caller's
 // context and returns nil iff the server is responsive right now.
-func quickHealthProbe(ctx context.Context, hostURL *url.URL) error {
+func quickHealthProbe(ctx context.Context, hostURL *url.URL, authToken string) error {
 	httpClient, reqURL, err := readinessHTTPClient(hostURL)
 	if err != nil {
 		return err
 	}
-	return probeHealth(ctx, httpClient, reqURL, hostURL)
+	return probeHealth(ctx, httpClient, reqURL, hostURL, authToken)
 }
 
 // perHostServerDir returns (and creates) the cache directory used for
@@ -730,7 +763,7 @@ func serverReadyTimeout() time.Duration {
 //
 // The HTTP transport is built to mirror how *client.Client dials so the
 // same unix socket / npipe / tcp setups all work uniformly here.
-func waitForServerReady(ctx context.Context, hostURL *url.URL) error {
+func waitForServerReady(ctx context.Context, hostURL *url.URL, authToken string) error {
 	httpClient, reqURL, err := readinessHTTPClient(hostURL)
 	if err != nil {
 		return err
@@ -752,7 +785,7 @@ func waitForServerReady(ctx context.Context, hostURL *url.URL) error {
 		}
 
 		attemptCtx, cancel := context.WithTimeout(ctx, perAttempt)
-		err := probeHealth(attemptCtx, httpClient, reqURL, hostURL)
+		err := probeHealth(attemptCtx, httpClient, reqURL, hostURL, authToken)
 		cancel()
 		if err == nil {
 			return nil
@@ -798,13 +831,16 @@ func readinessHTTPClient(hostURL *url.URL) (*http.Client, string, error) {
 
 // probeHealth issues a single GET to the readiness endpoint and treats
 // any 2xx response as success.
-func probeHealth(ctx context.Context, h *http.Client, reqURL string, hostURL *url.URL) error {
+func probeHealth(ctx context.Context, h *http.Client, reqURL string, hostURL *url.URL, authToken string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return err
 	}
 	if hostURL.Scheme == "unix" || hostURL.Scheme == "npipe" {
 		req.Host = client.DummyHost
+	}
+	if authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+authToken)
 	}
 	rsp, err := h.Do(req)
 	if err != nil {
@@ -834,8 +870,12 @@ func probeHealth(ctx context.Context, h *http.Client, reqURL string, hostURL *ur
 //
 // It returns restarted=true only when the server accepted the shutdown and
 // the caller must spawn a replacement.
-func restartIfStale(cmd *cobra.Command, hostURL *url.URL) (restarted bool, err error) {
-	c, err := client.NewClient("", hostURL.Scheme, hostURL.Host)
+func restartIfStale(cmd *cobra.Command, hostURL *url.URL, authTokens ...string) (restarted bool, err error) {
+	var authToken string
+	if len(authTokens) > 0 {
+		authToken = authTokens[0]
+	}
+	c, err := client.NewClient("", hostURL.Scheme, hostURL.Host, client.WithAuthToken(authToken))
 	if err != nil {
 		return false, err
 	}
@@ -921,7 +961,7 @@ func awaitSocketGone(ctx context.Context, hostURL *url.URL) error {
 
 var safeNameRegexp = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 
-func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
+func startDetachedServer(cmd *cobra.Command, hostURL *url.URL, authToken string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %v", err)
@@ -942,6 +982,9 @@ func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 	// DETACHED_PROCESS on windows) is what truly detaches the child from
 	// this process's lifetime.
 	c := exec.CommandContext(context.Background(), exe, cmdArgs...)
+	if authToken != "" {
+		c.Env = append(withoutServerToken(os.Environ()), "CRUSH_SERVER_TOKEN="+authToken)
+	}
 	stdoutPath := filepath.Join(chDir, "stdout.log")
 	stderrPath := filepath.Join(chDir, "stderr.log")
 	detachProcess(c)

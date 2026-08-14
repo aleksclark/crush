@@ -185,6 +185,22 @@ func TestRestartIfStale_MatchingServerUntouched(t *testing.T) {
 	require.Empty(t, log.all())
 }
 
+func TestRestartIfStale_ReportsUnauthorized(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	hostURL := &url.URL{Scheme: "tcp", Host: u.Host}
+
+	restarted, err := restartIfStale(versionCheckCmd(t), hostURL, "wrong")
+	require.ErrorIs(t, err, client.ErrUnauthorized)
+	require.False(t, restarted)
+}
+
 // TestCreateWorkspaceOnLiveServer_RetriesPastExitingServer covers the
 // startup race left over from making the shutdown decision final: a client
 // can reach a server in the instant between its committing to an idle

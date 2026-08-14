@@ -36,6 +36,7 @@ var serverCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to get debug flag: %v", err)
 		}
+		authToken := consumeServerToken(serverToken)
 
 		cfg, err := config.Load(config.GlobalWorkspaceDir(), dataDir, debug)
 		if err != nil {
@@ -55,7 +56,7 @@ var serverCmd = &cobra.Command{
 			crushlog.Setup(logFile, debug)
 		}
 
-		srv := server.NewServer(cfg, hostURL.Scheme, hostURL.Host)
+		srv := server.NewServer(cfg, hostURL.Scheme, hostURL.Host, server.WithAuthToken(authToken))
 		srv.SetLogger(slog.Default())
 		slog.Info("Starting Crush server...", "addr", serverHost)
 

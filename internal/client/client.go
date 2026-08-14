@@ -24,11 +24,22 @@ const DummyHost = "api.crush.localhost"
 
 // Client represents an RPC client connected to a Crush server.
 type Client struct {
-	h        *http.Client
-	path     string
-	network  string
-	addr     string
-	clientID string
+	h         *http.Client
+	path      string
+	network   string
+	addr      string
+	clientID  string
+	authToken string
+}
+
+// Option configures a Client.
+type Option func(*Client)
+
+// WithAuthToken configures the bearer token sent with every server request.
+func WithAuthToken(token string) Option {
+	return func(c *Client) {
+		c.authToken = token
+	}
 }
 
 // DefaultClient creates a new [Client] connected to the default server address.
@@ -42,12 +53,15 @@ func DefaultClient(path string) (*Client, error) {
 
 // NewClient creates a new [Client] connected to the server at the given
 // network and address.
-func NewClient(path, network, address string) (*Client, error) {
+func NewClient(path, network, address string, opts ...Option) (*Client, error) {
 	c := new(Client)
 	c.path = filepath.Clean(path)
 	c.network = network
 	c.addr = address
 	c.clientID = uuid.New().String()
+	for _, opt := range opts {
+		opt(c)
+	}
 	p := &http.Protocols{}
 	p.SetHTTP1(true)
 	p.SetUnencryptedHTTP2(true)
@@ -96,8 +110,8 @@ func (c *Client) Health(ctx context.Context) error {
 		return err
 	}
 	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("server health check failed: %s", rsp.Status)
+	if err := checkStatus(rsp); err != nil {
+		return fmt.Errorf("server health check failed: %w", err)
 	}
 	return nil
 }
@@ -110,6 +124,9 @@ func (c *Client) VersionInfo(ctx context.Context) (*proto.VersionInfo, error) {
 		return nil, err
 	}
 	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return nil, fmt.Errorf("failed to get server version: %w", err)
+	}
 	if err := json.NewDecoder(rsp.Body).Decode(&vi); err != nil {
 		return nil, err
 	}
@@ -266,6 +283,9 @@ func (c *Client) buildReq(ctx context.Context, method, url string, body io.Reade
 
 	for k, v := range headers {
 		r.Header[http.CanonicalHeaderKey(k)] = v
+	}
+	if c.authToken != "" {
+		r.Header.Set("Authorization", "Bearer "+c.authToken)
 	}
 
 	r.URL.Scheme = "http"
