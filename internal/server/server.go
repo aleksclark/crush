@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"fmt"
 	"log/slog"
 	"net"
@@ -96,8 +98,19 @@ type Server struct {
 	h  *http.Server
 	ln net.Listener
 
-	backend *backend.Backend
-	logger  *slog.Logger
+	backend   *backend.Backend
+	logger    *slog.Logger
+	authToken string
+}
+
+// Option configures a Server.
+type Option func(*Server)
+
+// WithAuthToken requires clients to authenticate with the given bearer token.
+func WithAuthToken(token string) Option {
+	return func(s *Server) {
+		s.authToken = token
+	}
 }
 
 // SetLogger sets the logger for the server.
@@ -122,10 +135,13 @@ func DefaultServer(cfg *config.ConfigStore) *Server {
 }
 
 // NewServer creates a new [Server] with the given network and address.
-func NewServer(cfg *config.ConfigStore, network, address string) *Server {
+func NewServer(cfg *config.ConfigStore, network, address string, opts ...Option) *Server {
 	s := new(Server)
 	s.Addr = address
 	s.network = network
+	for _, opt := range opts {
+		opt(s)
+	}
 
 	// The backend is created with a shutdown callback that triggers
 	// a graceful server shutdown (e.g. when the last workspace is
@@ -228,8 +244,25 @@ func (s *Server) installHandler() {
 	mux.Handle("/v1/docs/", httpswagger.WrapHandler)
 	s.h = &http.Server{
 		Protocols: &p,
-		Handler:   s.recoverHandler(s.loggingHandler(mux)),
+		Handler:   s.recoverHandler(s.loggingHandler(s.authHandler(mux))),
 	}
+}
+
+func (s *Server) authHandler(next http.Handler) http.Handler {
+	if s.authToken == "" {
+		return next
+	}
+	expected := sha256.Sum256([]byte(s.authToken))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+		actual := sha256.Sum256([]byte(token))
+		if !ok || !strings.EqualFold(scheme, "Bearer") || subtle.ConstantTimeCompare(expected[:], actual[:]) != 1 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Handler returns the server's HTTP handler. Exposed so test harnesses

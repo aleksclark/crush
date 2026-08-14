@@ -10,6 +10,11 @@ import (
 // Typed outcomes callers need to distinguish from ordinary transport
 // failures. Match them with errors.Is.
 var (
+	// ErrUnauthorized reports that the server rejected the client's
+	// authentication token. Callers must not treat this as a transport
+	// failure or try to replace the live server.
+	ErrUnauthorized = errors.New("unauthorized")
+
 	// ErrNotFound reports that the server answered 404. For a
 	// workspace-scoped call this means the server no longer knows the
 	// workspace — it was torn down, or the server was replaced under the
@@ -55,6 +60,8 @@ func checkStatus(rsp *http.Response, ok ...int) error {
 		err = fmt.Errorf("status code %d", rsp.StatusCode)
 	}
 	switch rsp.StatusCode {
+	case http.StatusUnauthorized:
+		return fmt.Errorf("%w: %w", ErrUnauthorized, err)
 	case http.StatusNotFound:
 		return fmt.Errorf("%w: %w", ErrNotFound, err)
 	case http.StatusServiceUnavailable:
