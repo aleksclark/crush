@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/agent/ultracore"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
@@ -1096,6 +1097,19 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	return err == nil && opts.Thinking != nil
 }
 
+func (c *coordinator) buildUltracoreProvider(address string, headers map[string]string, providerID string) (fantasy.Provider, error) {
+	opts := []ultracore.Option{
+		ultracore.WithHeaders(headers),
+	}
+	if address != "" {
+		opts = append(opts, ultracore.WithAddress(address))
+	}
+	if providerID != "" {
+		opts = append(opts, ultracore.WithName(providerID))
+	}
+	return ultracore.New(opts...)
+}
+
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool) (fantasy.Provider, error) {
 	headers := maps.Clone(providerCfg.ExtraHeaders)
 	if headers == nil {
@@ -1139,6 +1153,8 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
 	case "google-vertex":
 		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
+	case ultracore.Name:
+		return c.buildUltracoreProvider(baseURL, headers, providerCfg.ID)
 	case openaicompat.Name, hyper.Name:
 		switch providerCfg.ID {
 		case hyper.Name:
