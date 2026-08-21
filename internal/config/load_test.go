@@ -2,6 +2,9 @@ package config
 
 import (
 	"context"
+	"net"
+	"google.golang.org/grpc"
+	modelv1 "github.com/aleksclark/ultracore/gen/proto/ultracore/model/v1"
 	"io"
 	"log/slog"
 	"net/http"
@@ -2413,4 +2416,141 @@ func TestConfig_LoadFromBytes_EnvMerge(t *testing.T) {
 	require.NotNil(t, loadedConfig.Env)
 	require.Equal(t, "second", loadedConfig.Env["AWS_PROFILE"])
 	require.Equal(t, "us-east-1", loadedConfig.Env["AWS_REGION"])
+}
+
+func TestConfig_expandUltracoreGateways(t *testing.T) {
+	// Stand up a tiny in-process gateway via discover's gRPC path by
+	// reusing DiscoverUltracoreModels against a mock would require the
+	// mock server in config tests. Instead, spin a minimal ListModels
+	// server here.
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { lis.Close() })
+
+	maxTok := int64(4096)
+	srv := grpc.NewServer()
+	modelv1.RegisterModelGatewayServer(srv, &stubGateway{models: []*modelv1.Model{
+		{
+			Ref:                    &modelv1.ModelRef{Provider: "anthropic", Model: "claude-haiku-4-5"},
+			Name:                   "Claude Haiku 4.5",
+			ContextWindow:          200000,
+			DefaultMaxOutputTokens: &maxTok,
+			SupportsReasoning:      true,
+		},
+		{
+			Ref:           &modelv1.ModelRef{Provider: "openai", Model: "gpt-4.1-mini"},
+			Name:          "GPT-4.1 mini",
+			ContextWindow: 128000,
+		},
+	}})
+	go srv.Serve(lis)
+	t.Cleanup(srv.Stop)
+	addr := lis.Addr().String()
+
+	t.Run("expands gateway into per-provider configured entries", func(t *testing.T) {
+		cfg := &Config{
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"ultracore": {
+					Type:    "ultracore",
+					BaseURL: addr,
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewShellVariableResolver(env)
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, nil)
+		require.NoError(t, err)
+
+		// Umbrella + anthropic + openai
+		require.GreaterOrEqual(t, cfg.Providers.Len(), 3)
+
+		uc, ok := cfg.Providers.Get("ultracore")
+		require.True(t, ok)
+		require.Equal(t, catwalk.Type("ultracore"), uc.Type)
+		require.NotEmpty(t, uc.Models)
+		require.Contains(t, uc.Models[0].ID, "/")
+
+		anth, ok := cfg.Providers.Get("anthropic")
+		require.True(t, ok, "anthropic should be configured via gateway")
+		require.Equal(t, catwalk.Type("ultracore"), anth.Type)
+		require.Equal(t, addr, anth.BaseURL)
+		require.Equal(t, "", anth.APIKey)
+		require.Len(t, anth.Models, 1)
+		require.Equal(t, "claude-haiku-4-5", anth.Models[0].ID)
+
+		oai, ok := cfg.Providers.Get("openai")
+		require.True(t, ok)
+		require.Equal(t, catwalk.Type("ultracore"), oai.Type)
+		require.Len(t, oai.Models, 1)
+	})
+
+	t.Run("does not clobber directly configured provider with credentials", func(t *testing.T) {
+		cfg := &Config{
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"ultracore": {
+					Type:    "ultracore",
+					BaseURL: addr,
+				},
+				"openai": {
+					Type:    catwalk.TypeOpenAI,
+					APIKey:  "sk-direct",
+					BaseURL: "https://api.openai.com/v1",
+					Models:  []catwalk.Model{{ID: "gpt-direct", Name: "direct"}},
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewShellVariableResolver(env)
+		// Pass openai as a known provider so the known-provider path prepares it.
+		known := []catwalk.Provider{{
+			ID:          catwalk.InferenceProviderOpenAI,
+			Name:        "OpenAI",
+			APIKey:      "$OPENAI_API_KEY",
+			APIEndpoint: "https://api.openai.com/v1",
+			Type:        catwalk.TypeOpenAI,
+			Models:      []catwalk.Model{{ID: "gpt-catwalk"}},
+		}}
+		// User override has key "sk-direct" so known path keeps it.
+		// But configureProviders known path uses p.APIKey from catwalk
+		// after overlay - user config APIKey is applied when non-empty.
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, known)
+		require.NoError(t, err)
+
+		oai, ok := cfg.Providers.Get("openai")
+		require.True(t, ok)
+		// Must remain direct OpenAI, not rewritten to ultracore.
+		require.Equal(t, catwalk.TypeOpenAI, oai.Type)
+		require.Equal(t, "sk-direct", oai.APIKey)
+	})
+
+	t.Run("no ultracore entry means no expansion", func(t *testing.T) {
+		cfg := &Config{
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{}),
+		}
+		cfg.setDefaults("/tmp", "")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewShellVariableResolver(env)
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, nil)
+		require.NoError(t, err)
+		require.Equal(t, 0, cfg.Providers.Len())
+	})
+}
+
+// stubGateway is a minimal ModelGateway for config expand tests.
+type stubGateway struct {
+	modelv1.UnimplementedModelGatewayServer
+	models []*modelv1.Model
+}
+
+func (s *stubGateway) ListModels(_ context.Context, req *modelv1.ListModelsRequest) (*modelv1.ListModelsResponse, error) {
+	out := make([]*modelv1.Model, 0, len(s.models))
+	for _, m := range s.models {
+		if req.Provider != "" && m.GetRef().GetProvider() != req.Provider {
+			continue
+		}
+		out = append(out, m)
+	}
+	return &modelv1.ListModelsResponse{Models: out}, nil
 }

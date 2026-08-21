@@ -21,6 +21,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/agent/ultracore"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/env"
@@ -391,12 +392,28 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
+	// Expand Ultracore gateways into per-upstream providers so each shows
+	// as configured when the daemon holds credentials for them.
+	c.expandUltracoreGateways(ctx, resolver)
+
 	discoverCtx, discoverCancel := context.WithTimeout(ctx, 3*time.Second)
 	for id, pc := range c.Providers.Seq2() {
 		if knownProviderNames[id] {
+			// Known providers are already fully configured (or skipped).
+			// Still allow gRPC rediscovery when they were wired via ultracore.
+			if string(pc.Type) != ultracore.Name {
+				continue
+			}
+		}
+		if pc.Disable {
 			continue
 		}
-		if pc.Disable || pc.BaseURL == "" {
+		isUltracore := string(pc.Type) == ultracore.Name || id == ultracore.Name
+		baseURL := pc.BaseURL
+		if isUltracore && baseURL == "" {
+			baseURL = ultracore.DefaultAddress
+		}
+		if baseURL == "" {
 			continue
 		}
 		wantsDiscovery := pc.AutoDiscoverModels != nil && *pc.AutoDiscoverModels
@@ -407,17 +424,23 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		providerID := cmp.Or(pc.ID, id)
 		cfg := discover.Config{
 			ID:             providerID,
-			BaseURL:        pc.BaseURL,
+			BaseURL:        baseURL,
 			APIKey:         pc.APIKey,
 			ExtraHeaders:   pc.ExtraHeaders,
 			ExistingModels: pc.Models,
 		}
 		providerType := cmp.Or(pc.Type, catwalk.TypeOpenAICompat)
 		wg.Go(func() {
-			models, err := discover.DiscoverModels(discoverCtx, cfg, resolver)
-			if err == nil && len(models) > 0 {
-				if enricher := discover.GetEnricher(string(providerType)); enricher != nil {
-					models, _ = enricher.EnrichModels(discoverCtx, cfg, resolver, models)
+			var models []catwalk.Model
+			var err error
+			if string(providerType) == ultracore.Name || providerID == ultracore.Name {
+				models, err = discover.DiscoverUltracoreModels(discoverCtx, cfg, resolver)
+			} else {
+				models, err = discover.DiscoverModels(discoverCtx, cfg, resolver)
+				if err == nil && len(models) > 0 {
+					if enricher := discover.GetEnricher(string(providerType)); enricher != nil {
+						models, _ = enricher.EnrichModels(discoverCtx, cfg, resolver, models)
+					}
 				}
 			}
 			mu.Lock()
@@ -456,9 +479,13 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}
 		if providerConfig.BaseURL == "" {
-			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id)
-			c.Providers.Del(id)
-			continue
+			if string(providerConfig.Type) == ultracore.Name || id == ultracore.Name {
+				providerConfig.BaseURL = ultracore.DefaultAddress
+			} else {
+				slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id)
+				c.Providers.Del(id)
+				continue
+			}
 		}
 
 		// Apply discovery results if available.
@@ -515,6 +542,228 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	}
 
 	return nil
+}
+
+// expandUltracoreGateways finds configured ultracore endpoints (or probes the
+// default local daemon) and materializes one Crush provider per upstream
+// gateway provider. Gateway-backed providers need no API key: credentials live
+// in the daemon. Existing non-ultracore providers that already have credentials
+// are left untouched so direct/cloud configs keep working.
+func (c *Config) expandUltracoreGateways(ctx context.Context, resolver VariableResolver) {
+	type seed struct {
+		id      string
+		address string
+		headers map[string]string
+		name    string
+	}
+
+	var seeds []seed
+	seenAddr := map[string]struct{}{}
+
+	for id, pc := range c.Providers.Seq2() {
+		if pc.Disable {
+			continue
+		}
+		if string(pc.Type) != ultracore.Name && id != ultracore.Name {
+			continue
+		}
+		address := pc.BaseURL
+		if address == "" {
+			address = ultracore.DefaultAddress
+		}
+		if resolved, err := resolver.ResolveValue(address); err == nil && resolved != "" {
+			address = resolved
+		}
+		if _, ok := seenAddr[address]; ok {
+			// Still record the provider id so its models get filled below.
+			seeds = append(seeds, seed{id: id, address: address, headers: pc.ExtraHeaders, name: pc.Name})
+			continue
+		}
+		seenAddr[address] = struct{}{}
+		seeds = append(seeds, seed{id: id, address: address, headers: pc.ExtraHeaders, name: pc.Name})
+	}
+
+	if len(seeds) == 0 {
+		// No ultracore provider configured — do not probe the network.
+		// Users opt in with a providers.ultracore (or type: ultracore) entry.
+		return
+	}
+
+	expandCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	// Cache ListModels per address so multiple seed ids sharing a gateway
+	// only hit the daemon once.
+	listed := map[string]map[string][]catwalk.Model{}
+	for _, s := range seeds {
+		if _, ok := listed[s.address]; ok {
+			continue
+		}
+		byProvider, err := discover.ListUltracoreGatewayModels(expandCtx, s.address)
+		if err != nil {
+			slog.Warn("Ultracore gateway model list failed", "address", s.address, "error", err)
+			listed[s.address] = nil
+			continue
+		}
+		if len(byProvider) == 0 {
+			slog.Warn("Ultracore gateway returned no models", "address", s.address)
+			listed[s.address] = byProvider
+			continue
+		}
+		listed[s.address] = byProvider
+	}
+
+	// Materialize one Crush provider per upstream gateway provider.
+	// Track which addresses already expanded siblings to avoid duplicates.
+	expandedAddr := map[string]struct{}{}
+	for _, s := range seeds {
+		byProvider := listed[s.address]
+		if len(byProvider) == 0 {
+			continue
+		}
+
+		// Populate the seed entry itself.
+		if models, ok := byProvider[s.id]; ok && s.id != ultracore.Name {
+			// Seed id is a concrete upstream provider (e.g. providers.openai).
+			existing, _ := c.Providers.Get(s.id)
+			existing.ID = s.id
+			existing.Name = cmp.Or(s.name, existing.Name, s.id)
+			existing.Type = catwalk.Type(ultracore.Name)
+			existing.BaseURL = s.address
+			existing.Models = mergeModels(existing.Models, models)
+			if existing.ExtraHeaders == nil && s.headers != nil {
+				existing.ExtraHeaders = maps.Clone(s.headers)
+			}
+			c.Providers.Set(s.id, existing)
+		} else {
+			// Umbrella / alias entry: all models as provider/model ids.
+			var all []catwalk.Model
+			seenModel := map[string]struct{}{}
+			for providerID, models := range byProvider {
+				for _, m := range models {
+					id := m.ID
+					if !strings.HasPrefix(id, providerID+"/") {
+						id = providerID + "/" + m.ID
+					}
+					if _, ok := seenModel[id]; ok {
+						continue
+					}
+					seenModel[id] = struct{}{}
+					cloned := m
+					cloned.ID = id
+					if cloned.Name == "" || cloned.Name == m.ID {
+						cloned.Name = id
+					}
+					all = append(all, cloned)
+				}
+			}
+			slices.SortFunc(all, func(a, b catwalk.Model) int {
+				return strings.Compare(a.ID, b.ID)
+			})
+			existing, _ := c.Providers.Get(s.id)
+			existing.ID = s.id
+			existing.Name = cmp.Or(s.name, existing.Name, s.id, "Ultracore")
+			existing.Type = catwalk.Type(ultracore.Name)
+			existing.BaseURL = s.address
+			if len(existing.Models) == 0 {
+				existing.Models = all
+			} else {
+				existing.Models = mergeModels(existing.Models, all)
+			}
+			if existing.ExtraHeaders == nil && s.headers != nil {
+				existing.ExtraHeaders = maps.Clone(s.headers)
+			}
+			c.Providers.Set(s.id, existing)
+		}
+
+		if _, done := expandedAddr[s.address]; done {
+			continue
+		}
+		expandedAddr[s.address] = struct{}{}
+
+		for providerID, models := range byProvider {
+			if providerID == "" || len(models) == 0 {
+				continue
+			}
+			// Don't overwrite the seed entry we just filled.
+			if providerID == s.id {
+				continue
+			}
+			if existing, ok := c.Providers.Get(providerID); ok {
+				// Keep directly configured providers that already have credentials.
+				if string(existing.Type) != ultracore.Name && providerHasCredentials(existing, resolver) {
+					continue
+				}
+				if string(existing.Type) == ultracore.Name {
+					existing.Models = mergeModels(existing.Models, models)
+					existing.BaseURL = cmp.Or(existing.BaseURL, s.address)
+					existing.Type = catwalk.Type(ultracore.Name)
+					if existing.Name == "" {
+						existing.Name = providerID
+					}
+					existing.ID = providerID
+					c.Providers.Set(providerID, existing)
+					continue
+				}
+				// Existing entry without credentials (e.g. known provider skipped
+				// for missing key was deleted already). Fall through to create.
+			}
+
+			prepared := ProviderConfig{
+				ID:           providerID,
+				Name:         providerID,
+				Type:         catwalk.Type(ultracore.Name),
+				BaseURL:      s.address,
+				Models:       models,
+				ExtraHeaders: maps.Clone(s.headers),
+			}
+			c.Providers.Set(providerID, prepared)
+			slog.Info("Configured provider via Ultracore gateway", "provider", providerID, "models", len(models), "address", s.address)
+		}
+	}
+
+}
+
+// ultracoreBacked reports whether a provider is already routed through the gateway.
+func ultracoreBacked(pc ProviderConfig) bool {
+	return string(pc.Type) == ultracore.Name
+}
+
+// providerHasCredentials is a best-effort check used to avoid clobbering a
+// directly configured cloud provider with a gateway-backed one.
+func providerHasCredentials(pc ProviderConfig, resolver VariableResolver) bool {
+	if pc.OAuthToken != nil {
+		return true
+	}
+	if pc.APIKey != "" {
+		if v, err := resolver.ResolveValue(pc.APIKey); err == nil && v != "" {
+			return true
+		}
+	}
+	// Bedrock may auth via ambient AWS env; treat non-empty extra params as signal.
+	if pc.Type == catwalk.TypeBedrock || string(pc.Type) == string(catwalk.InferenceProviderBedrock) {
+		return true
+	}
+	return false
+}
+
+// mergeModels appends discovered models whose IDs are not already present.
+func mergeModels(existing, discovered []catwalk.Model) []catwalk.Model {
+	if len(discovered) == 0 {
+		return existing
+	}
+	seen := make(map[string]struct{}, len(existing))
+	for _, m := range existing {
+		seen[m.ID] = struct{}{}
+	}
+	out := append([]catwalk.Model(nil), existing...)
+	for _, m := range discovered {
+		if _, ok := seen[m.ID]; ok {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // applyEnv sets top-level env vars from the config. Keys are sorted for

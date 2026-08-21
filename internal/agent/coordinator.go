@@ -417,8 +417,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if !hasReasoningEffort && shouldSetEffort {
 			mergedOptions["reasoning_effort"] = reasoningEffort
 		}
-		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
-			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
+		if openai.IsResponsesModel(model.CatwalkCfg.ID) || looksLikeOpenAIResponsesModel(model.CatwalkCfg.ID) {
+			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) || looksLikeOpenAIReasoningModel(model.CatwalkCfg.ID) {
 				mergedOptions["reasoning_summary"] = "auto"
 				mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
 			}
@@ -432,6 +432,9 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				options[openai.Name] = parsed
 			}
 		}
+
+	case catwalk.Type(ultracore.Name):
+		applyUltracoreProviderOptions(model, mergedOptions, reasoningEffort, shouldSetEffort, options)
 
 	case anthropic.Name, bedrock.Name:
 		var (
@@ -1175,6 +1178,128 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}
+}
+
+
+// looksLikeOpenAIResponsesModel is a looser match than fantasy's exact-ID list
+// so gateway-discovered variants (gpt-5.6-sol, gpt-5.4-mini, ...) still get
+// Responses API provider options from Crush.
+
+// applyUltracoreProviderOptions picks Fantasy provider-option keys based on the
+// exposed model / provider id so gateway-backed OpenAI, Anthropic, and Gemini
+// models get the same thinking/reasoning controls as native providers.
+func applyUltracoreProviderOptions(model Model, mergedOptions map[string]any, reasoningEffort string, shouldSetEffort bool, options fantasy.ProviderOptions) {
+	id := strings.ToLower(model.CatwalkCfg.ID)
+	providerID := strings.ToLower(model.ModelCfg.Provider)
+	family := ultracoreModelFamily(providerID, id)
+
+	switch family {
+	case "openai":
+		if shouldSetEffort {
+			if _, ok := mergedOptions["reasoning_effort"]; !ok {
+				mergedOptions["reasoning_effort"] = reasoningEffort
+			}
+		}
+		if looksLikeOpenAIResponsesModel(id) {
+			if looksLikeOpenAIReasoningModel(id) {
+				mergedOptions["reasoning_summary"] = "auto"
+				mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
+			}
+			if parsed, err := openai.ParseResponsesOptions(mergedOptions); err == nil {
+				options[openai.Name] = parsed
+			}
+			return
+		}
+		if parsed, err := openaicompat.ParseOptions(mergedOptions); err == nil {
+			options[openaicompat.Name] = parsed
+		}
+	case "anthropic":
+		if shouldSetEffort {
+			if _, ok := mergedOptions["effort"]; !ok {
+				mergedOptions["effort"] = reasoningEffort
+			}
+		} else if model.ModelCfg.Think {
+			if _, ok := mergedOptions["thinking"]; !ok {
+				mergedOptions["thinking"] = map[string]any{"budget_tokens": 2000}
+			}
+		}
+		if parsed, err := anthropic.ParseOptions(mergedOptions); err == nil {
+			options[anthropic.Name] = parsed
+		}
+	case "google":
+		if _, ok := mergedOptions["thinking_config"]; !ok {
+			if strings.Contains(id, "gemini-2") {
+				mergedOptions["thinking_config"] = map[string]any{
+					"thinking_budget":  2000,
+					"include_thoughts": true,
+				}
+			} else if shouldSetEffort || model.CatwalkCfg.CanReason {
+				mergedOptions["thinking_config"] = map[string]any{
+					"thinking_level":   reasoningEffort,
+					"include_thoughts": true,
+				}
+			}
+		}
+		if parsed, err := google.ParseOptions(mergedOptions); err == nil {
+			options[google.Name] = parsed
+		}
+	default:
+		if shouldSetEffort {
+			if _, ok := mergedOptions["reasoning_effort"]; !ok {
+				mergedOptions["reasoning_effort"] = reasoningEffort
+			}
+		}
+		if parsed, err := openaicompat.ParseOptions(mergedOptions); err == nil {
+			options[openaicompat.Name] = parsed
+		}
+	}
+}
+
+func ultracoreModelFamily(providerID, modelID string) string {
+	s := providerID + " " + modelID
+	switch {
+	case strings.Contains(s, "anthropic"), strings.Contains(s, "claude"), strings.Contains(s, "bedrock"):
+		return "anthropic"
+	case strings.Contains(s, "google"), strings.Contains(s, "gemini"):
+		return "google"
+	case strings.Contains(s, "openai"), strings.Contains(s, "gpt-"), strings.HasPrefix(modelID, "o1"), strings.HasPrefix(modelID, "o3"), strings.HasPrefix(modelID, "o4"), strings.Contains(s, "chatgpt"):
+		return "openai"
+	default:
+		return "compat"
+	}
+}
+
+func looksLikeOpenAIResponsesModel(modelID string) bool {
+	id := strings.ToLower(modelID)
+	if i := strings.LastIndexByte(id, '/'); i >= 0 && i+1 < len(id) {
+		id = id[i+1:]
+	}
+	if looksLikeOpenAIReasoningModel(id) {
+		return true
+	}
+	for _, p := range []string{"gpt-4.1", "gpt-4o", "gpt-4.5", "gpt-4-", "chatgpt-4o", "gpt-5"} {
+		if strings.HasPrefix(id, p) || id == "gpt-4" {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeOpenAIReasoningModel(modelID string) bool {
+	id := strings.ToLower(modelID)
+	if i := strings.LastIndexByte(id, '/'); i >= 0 && i+1 < len(id) {
+		id = id[i+1:]
+	}
+	if strings.HasPrefix(id, "o1") || strings.HasPrefix(id, "o3") || strings.HasPrefix(id, "o4") {
+		return true
+	}
+	if strings.Contains(id, "gpt-5") && !strings.Contains(id, "gpt-5-chat") {
+		return true
+	}
+	if strings.Contains(id, "codex-") {
+		return true
+	}
+	return false
 }
 
 func isExactoSupported(modelID string) bool {
