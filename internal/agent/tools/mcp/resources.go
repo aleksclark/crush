@@ -5,6 +5,8 @@ import (
 	"errors"
 	"iter"
 	"log/slog"
+	"sync"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -16,7 +18,14 @@ type Resource = mcp.Resource
 
 type ResourceContents = mcp.ResourceContents
 
-var allResources = csync.NewMap[string, []*Resource]()
+var (
+	allResources = csync.NewMap[string, []*Resource]()
+
+	resourceNotificationMu    sync.Mutex
+	resourceNotificationUntil = make(map[string]time.Time)
+)
+
+const resourceListNotificationWindow = time.Second
 
 // Resources returns all available MCP resources.
 func Resources() iter.Seq2[string, []*Resource] {
@@ -75,6 +84,18 @@ func RefreshResources(ctx context.Context, name string) {
 	prev, _ := states.Get(name)
 	prev.Counts.Resources = resourceCount
 	updateState(name, StateConnected, nil, session, prev.Counts)
+}
+
+func shouldHandleResourceListNotification(name string) bool {
+	resourceNotificationMu.Lock()
+	defer resourceNotificationMu.Unlock()
+
+	now := time.Now()
+	if now.Before(resourceNotificationUntil[name]) {
+		return false
+	}
+	resourceNotificationUntil[name] = now.Add(resourceListNotificationWindow)
+	return true
 }
 
 func getResources(ctx context.Context, c *ClientSession) ([]*Resource, error) {

@@ -922,10 +922,12 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 				})
 			},
 			ResourceListChangedHandler: func(context.Context, *mcp.ResourceListChangedRequest) {
-				broker.Publish(pubsub.UpdatedEvent, Event{
-					Type: EventResourcesListChanged,
-					Name: name,
-				})
+				if shouldHandleResourceListNotification(name) {
+					broker.Publish(pubsub.UpdatedEvent, Event{
+						Type: EventResourcesListChanged,
+						Name: name,
+					})
+				}
 			},
 			LoggingMessageHandler: func(ctx context.Context, req *mcp.LoggingMessageRequest) {
 				level := parseLevel(string(req.Params.Level))
