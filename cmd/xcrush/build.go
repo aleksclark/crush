@@ -149,11 +149,7 @@ require (
 		crushModContent, err := os.ReadFile(crushModPath)
 		if err == nil {
 			for _, replace := range extractReplaceDirectives(string(crushModContent)) {
-				targetPath := replace.Path
-				if isLocalPath(targetPath) && !filepath.IsAbs(targetPath) {
-					targetPath = filepath.Join(filepath.Dir(crushModPath), targetPath)
-					targetPath, _ = filepath.Abs(targetPath)
-				}
+				targetPath := resolveReplacementPath(filepath.Dir(crushModPath), replace.Path)
 				goModContent += fmt.Sprintf("replace %s => %s\n", replace.Module, targetPath)
 			}
 		}
@@ -184,11 +180,7 @@ require (
 				if replace.Module == crushModule {
 					continue
 				}
-				targetPath := replace.Path
-				if !filepath.IsAbs(targetPath) {
-					targetPath = filepath.Join(absPath, targetPath)
-					targetPath, _ = filepath.Abs(targetPath)
-				}
+				targetPath := resolveReplacementPath(absPath, replace.Path)
 				goModContent += fmt.Sprintf("replace %s => %s\n", replace.Module, targetPath)
 			}
 		}
@@ -323,6 +315,15 @@ func extractReplaceDirectives(content string) []replaceDirective {
 		}
 	}
 	return directives
+}
+
+// resolveReplacementPath resolves relative directory replacements against the
+// declaring module, leaving absolute paths and versioned module targets intact.
+func resolveReplacementPath(moduleDir, target string) string {
+	if isLocalPath(target) && !filepath.IsAbs(target) {
+		return filepath.Join(moduleDir, target)
+	}
+	return target
 }
 
 func isLocalPath(p string) bool {
